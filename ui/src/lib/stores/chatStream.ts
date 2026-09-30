@@ -13,14 +13,7 @@
 
 import { get } from 'svelte/store';
 import { lastMessage, wsStatus, type WsStatus } from './websocket';
-import {
-	chatMessages,
-	streamingMessageId,
-	activeTools,
-	activeConversationId,
-	conversations,
-	chatSending
-} from './chat';
+import { chatSession } from './chat';
 import { engineApi } from '$lib/api/engine';
 import type { ChatMessage } from '$lib/api/types';
 
@@ -67,13 +60,13 @@ export function mergeStreamingIntoLoaded(
 	return [...loaded, live];
 }
 
-/** Replace chatMessages with a DB load, preserving any in-flight streaming reply. */
+/** Replace chat messages with a DB load, preserving any in-flight streaming reply. */
 export function applyLoadedMessages(conversationId: string | null, loaded: ChatMessage[]): void {
-	const streamId = get(streamingMessageId);
-	const live = streamId
-		? get(chatMessages).find((m) => m.message_id === streamId)
+	const { streamingMessageId, messages } = get(chatSession);
+	const live = streamingMessageId
+		? messages.find((m) => m.message_id === streamingMessageId)
 		: undefined;
-	chatMessages.set(mergeStreamingIntoLoaded(loaded, live, conversationId));
+	chatSession.update((s) => ({ ...s, messages: mergeStreamingIntoLoaded(loaded, live, conversationId) }));
 }
 
 function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }): void {
@@ -81,41 +74,44 @@ function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }
 		case 'chat_stream_start': {
 			const msgId = raw.message_id as string;
 			const convId = raw.conversation_id as string | undefined;
-			streamingMessageId.set(msgId);
-			activeTools.set([]);
-			// Track the conversation if auto-created by backend
-			if (convId && !get(activeConversationId)) {
-				activeConversationId.set(convId);
-			}
-			// Add the placeholder — but only into the conversation it belongs to.
-			// If the user switched to another conversation between send and start,
-			// the stream state stays global while the visible list is left alone;
-			// the reply is picked up from the DB when its conversation is reopened.
-			if (!convId || get(activeConversationId) === convId) {
-				const placeholder: ChatMessage = {
-					message_id: msgId,
-					timestamp: new Date().toISOString(),
-					role: 'assistant',
-					content: '',
-					referenced_cards: [],
-					referenced_events: [],
-					conversation_id: convId
-				};
-				chatMessages.update((msgs) => [...msgs, placeholder]);
-			}
+			chatSession.update((s) => {
+				// Track the conversation if auto-created by backend
+				const activeConversationId =
+					convId && !s.activeConversationId ? convId : s.activeConversationId;
+				// Add the placeholder — but only into the conversation it belongs to.
+				// If the user switched to another conversation between send and start,
+				// the stream state stays global while the visible list is left alone;
+				// the reply is picked up from the DB when its conversation is reopened.
+				let messages = s.messages;
+				if (!convId || activeConversationId === convId) {
+					const placeholder: ChatMessage = {
+						message_id: msgId,
+						timestamp: new Date().toISOString(),
+						role: 'assistant',
+						content: '',
+						referenced_cards: [],
+						referenced_events: [],
+						conversation_id: convId
+					};
+					messages = [...messages, placeholder];
+				}
+				return { ...s, streamingMessageId: msgId, activeTools: [], activeConversationId, messages };
+			});
 			break;
 		}
 
 		case 'chat_stream_chunk': {
 			const chunk = raw.content as string;
 			if (chunk) {
-				const currentStreamId = get(streamingMessageId);
-				chatMessages.update((msgs) => {
-					const last = msgs[msgs.length - 1];
-					if (last && last.role === 'assistant' && last.message_id === currentStreamId) {
-						return [...msgs.slice(0, -1), { ...last, content: last.content + chunk }];
+				chatSession.update((s) => {
+					const last = s.messages[s.messages.length - 1];
+					if (last && last.role === 'assistant' && last.message_id === s.streamingMessageId) {
+						return {
+							...s,
+							messages: [...s.messages.slice(0, -1), { ...last, content: last.content + chunk }]
+						};
 					}
-					return msgs;
+					return s;
 				});
 			}
 			break;
@@ -125,37 +121,43 @@ function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }
 			const toolName = raw.tool as string;
 			const status = raw.status as string;
 			if (status === 'calling') {
-				activeTools.update((t) => [...t, toolName]);
+				chatSession.update((s) => ({ ...s, activeTools: [...s.activeTools, toolName] }));
 			} else if (status === 'done') {
-				activeTools.update((t) => t.filter((n) => n !== toolName));
+				chatSession.update((s) => ({
+					...s,
+					activeTools: s.activeTools.filter((n) => n !== toolName)
+				}));
 			}
 			break;
 		}
 
 		case 'chat_stream_done': {
 			const chatMsg = raw.message as ChatMessage | undefined;
-			if (chatMsg) {
-				// Match by the message's own id (the placeholder carries the same
-				// id): after a mid-stream reload the DB row is already in the list,
-				// so matching by streamingMessageId alone could duplicate it.
-				const convId = chatMsg.conversation_id;
-				if (!convId || get(activeConversationId) === convId) {
-					chatMessages.update((msgs) => {
-						const idx = msgs.findIndex((m) => m.message_id === chatMsg.message_id);
+			chatSession.update((s) => {
+				let messages = s.messages;
+				if (chatMsg) {
+					// Match by the message's own id (the placeholder carries the same
+					// id): after a mid-stream reload the DB row is already in the list,
+					// so matching by streamingMessageId alone could duplicate it.
+					const convId = chatMsg.conversation_id;
+					if (!convId || s.activeConversationId === convId) {
+						const idx = messages.findIndex((m) => m.message_id === chatMsg.message_id);
 						if (idx >= 0) {
-							const updated = [...msgs];
+							const updated = [...messages];
 							updated[idx] = chatMsg;
-							return updated;
+							messages = updated;
+						} else {
+							messages = [...messages, chatMsg];
 						}
-						return [...msgs, chatMsg];
-					});
+					}
 				}
-			}
-			streamingMessageId.set(null);
-			activeTools.set([]);
-			chatSending.set(false);
+				return { ...s, messages, streamingMessageId: null, activeTools: [], sending: false };
+			});
 			// Refresh conversations list to update preview/timestamp
-			engineApi.getConversations(100).then((list) => conversations.set(list)).catch(() => {});
+			engineApi
+				.getConversations(100)
+				.then((list) => chatSession.update((s) => ({ ...s, conversations: list })))
+				.catch(() => {});
 			break;
 		}
 
@@ -165,9 +167,12 @@ function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }
 			const convId = raw.conversation_id as string | undefined;
 			const newTitle = raw.title as string | undefined;
 			if (convId && newTitle) {
-				conversations.update((list) =>
-					list.map((c) => (c.conversation_id === convId ? { ...c, title: newTitle } : c))
-				);
+				chatSession.update((s) => ({
+					...s,
+					conversations: s.conversations.map((c) =>
+						c.conversation_id === convId ? { ...c, title: newTitle } : c
+					)
+				}));
 			}
 			break;
 		}
@@ -176,8 +181,8 @@ function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }
 		case 'chat_response': {
 			const payload = raw.payload as { message?: ChatMessage } | undefined;
 			if (payload?.message) {
-				chatMessages.update((msgs) => [...msgs, payload.message as ChatMessage]);
-				chatSending.set(false);
+				const message = payload.message;
+				chatSession.update((s) => ({ ...s, messages: [...s.messages, message], sending: false }));
 			}
 			break;
 		}
@@ -185,16 +190,17 @@ function handleChatStreamMessage(raw: Record<string, unknown> & { type: string }
 }
 
 function handleWsStatus(status: WsStatus): void {
-	if (status === 'disconnected' && (get(streamingMessageId) || get(chatSending))) {
-		// The engine keeps processing (and persisting) the reply, but its stream
-		// events can no longer reach us — and the done-event may be lost entirely.
-		// Clear the busy state so the input can't stay disabled forever (that was
-		// how a lost stream used to silently brick sending), and remember the
-		// conversation so its persisted content can be re-pulled on reconnect.
-		interruptedConvId = get(activeConversationId);
-		streamingMessageId.set(null);
-		activeTools.set([]);
-		chatSending.set(false);
+	if (status === 'disconnected') {
+		const { streamingMessageId, sending, activeConversationId } = get(chatSession);
+		if (streamingMessageId || sending) {
+			// The engine keeps processing (and persisting) the reply, but its stream
+			// events can no longer reach us — and the done-event may be lost entirely.
+			// Clear the busy state so the input can't stay disabled forever (that was
+			// how a lost stream used to silently brick sending), and remember the
+			// conversation so its persisted content can be re-pulled on reconnect.
+			interruptedConvId = activeConversationId;
+			chatSession.update((s) => ({ ...s, streamingMessageId: null, activeTools: [], sending: false }));
+		}
 	}
 	if (status === 'connected' && prevWsStatus !== 'connected' && interruptedConvId) {
 		const convId = interruptedConvId;
@@ -202,7 +208,7 @@ function handleWsStatus(status: WsStatus): void {
 		// Self-heal: the engine flushes partial content to the DB during the
 		// stream, so a reload after reconnect shows whatever survived the gap
 		// (and the final reply, if it finished while we were away).
-		if (get(activeConversationId) === convId) {
+		if (get(chatSession).activeConversationId === convId) {
 			engineApi
 				.getConversationMessages(convId, 50)
 				.then((msgs) => applyLoadedMessages(convId, msgs.reverse()))
