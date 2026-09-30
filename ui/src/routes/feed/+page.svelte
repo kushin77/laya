@@ -9,16 +9,12 @@
 	import { feedFilters, feedDate, feedPrevDate, feedNextDate, localToday, allDaysSavedDate, type FeedFilters } from '$lib/stores/feedFilters';
 	import type { ActionCard, CardGroup, GroupSummary, DaySummary, DayEventsResponse, SpaceSummary, Tag } from '$lib/api/types';
 	import { reduceCardUpdated, removeCardFromGroups, type CardUpdatePayload } from '$lib/feed/cardUpdateReducer';
-	import CardGroupComponent from '$lib/components/feed/CardGroup.svelte';
-	import ActionCardComponent from '$lib/components/feed/ActionCard.svelte';
 	import CardDetail from '$lib/components/feed/CardDetail.svelte';
 	import GroupSummaryDetail from '$lib/components/feed/GroupSummaryDetail.svelte';
 	import SummaryModal from '$lib/components/feed/SummaryModal.svelte';
 	import FilterPopover from '$lib/components/feed/FilterPopover.svelte';
 	import { feedViewMode } from '$lib/stores/feedView';
 	import { feedSelection } from '$lib/stores/feedSelection';
-	import ListRow from '$lib/components/feed/ListRow.svelte';
-	import ListGroupComponent from '$lib/components/feed/ListGroup.svelte';
 	import BulkActionsDropdown from '$lib/components/feed/BulkActionsDropdown.svelte';
 	import LinkDialog from '$lib/components/feed/LinkDialog.svelte';
 	import { recentCards, recentDrawerOpen, trackCardVisit, trackGroupVisit, type RecentCardEntry } from '$lib/stores/recentCards';
@@ -33,6 +29,7 @@
 	import { searchFocusSignal, feedSearchQuery } from '$lib/stores/searchFocus';
 	import { portal } from '$lib/actions/portal';
 	import TimelineView from '$lib/components/feed/timeline/TimelineView.svelte';
+	import FeedGroupsView from '$lib/components/feed/FeedGroupsView.svelte';
 	import { platformKey } from '$lib/utils/cardVisuals';
 	import { threadAttention } from '$lib/utils/threadAttention';
 	import { formatMinutes, localMinutes } from '$lib/timeline/scale';
@@ -2321,123 +2318,37 @@
 					<p class="text-laya-base">No cards match "<span class="text-surface-300">{searchQuery}</span>"</p>
 					<button class="mt-2 text-laya-secondary text-laya-orange hover:underline" onclick={() => (searchQuery = '')}>Clear search</button>
 				</div>
-			<!-- ── LIST VIEW ── -->
-			{:else if $feedViewMode === 'list'}
-				{#if sections}
-					<!-- Sorted list view with section separators -->
-					{#each sections as [sectionTitle, sectionGroups], si}
-						{@const isCollapsed = collapsedSections.has(sectionTitle)}
-						<div
-							class="flex cursor-pointer items-center gap-3 pr-3 {si > 0 ? 'mt-5' : ''} mb-2 select-none"
-							role="button"
-							tabindex="0"
-							onclick={() => toggleSection(sectionTitle)}
-							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(sectionTitle); } }}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0 text-surface-500 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-							</svg>
-							<span class="text-laya-secondary font-semibold uppercase tracking-wider text-surface-400">{sectionTitle}</span>
-							<div class="flex-1 border-t border-surface-700"></div>
-							<span class="text-laya-micro text-surface-500">{sectionGroups.reduce((s, g) => s + g.card_count, 0)}</span>
-						</div>
-						{#if !isCollapsed}
-							<div class="flex flex-col gap-1 mb-2">
-								{#each sectionGroups as group (group.entity_id)}
-									<div data-entity-id={group.entity_id} data-list-row>
-									{#if group.card_count === 1}
-										<ListRow card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} selectedCardId={selectedCard?.card_id ?? ''} bulkSelected={$feedSelection.has(group.cards[0].card_id)} onbulktoggle={handleBulkToggle} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-									{:else}
-										<ListGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} scrollToCardId={_scrollToCardId} bulkSelectedIds={$feedSelection} onbulktoggle={handleBulkToggle} onbulktogglegroup={handleBulkToggleGroup} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} />
-									{/if}
-									</div>
-								{/each}
-							</div>
-						{/if}
-					{/each}
-				{:else}
-					<!-- Default list view -->
-					<div class="flex flex-col gap-1">
-						{#each filteredGroups as group (group.entity_id)}
-							<div data-entity-id={group.entity_id} data-list-row>
-							{#if group.card_count === 1}
-								<ListRow card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} selectedCardId={selectedCard?.card_id ?? ''} bulkSelected={$feedSelection.has(group.cards[0].card_id)} onbulktoggle={handleBulkToggle} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-							{:else}
-								<ListGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} scrollToCardId={_scrollToCardId} bulkSelectedIds={$feedSelection} onbulktoggle={handleBulkToggle} onbulktogglegroup={handleBulkToggleGroup} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} />
-							{/if}
-							</div>
-						{/each}
-					</div>
-				{/if}
-			<!-- ── CARD VIEW ── -->
-			{:else if sections}
-				<!-- Sorted view with section separators -->
-				{#each sections as [sectionTitle, sectionGroups], si}
-					{@const isCollapsed = collapsedSections.has(sectionTitle)}
-					<div
-						class="flex cursor-pointer items-center gap-3 pr-3 {si > 0 ? 'mt-5' : ''} mb-3 select-none"
-						role="button"
-						tabindex="0"
-						onclick={() => toggleSection(sectionTitle)}
-						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(sectionTitle); } }}
-					>
-						<svg class="h-3.5 w-3.5 shrink-0 text-surface-500 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-						</svg>
-						<span class="text-laya-secondary font-semibold uppercase tracking-wider text-surface-400">{sectionTitle}</span>
-						<div class="flex-1 border-t border-surface-700"></div>
-						<span class="text-laya-micro text-surface-500">{sectionGroups.reduce((s, g) => s + g.card_count, 0)}</span>
-					</div>
-					{#if !isCollapsed}
-						<div class="flex flex-wrap gap-4">
-							{#each toColumns(sectionGroups) as col}
-								<div class="flex w-[320px] flex-col gap-4">
-									{#each col as group (group.entity_id)}
-									{@const isGroupExiting = group.cards.every((c) => exitingCardIds.has(c.card_id))}
-									<div data-entity-id={group.entity_id} class="card-exit-wrap {isGroupExiting ? 'card-exiting' : ''}">
-										{#if group.card_count === 1}
-											<ActionCardComponent card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} onlink={handleLinkCard} selectedCardId={selectedCard?.card_id ?? ''} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-										{:else}
-											<CardGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} scrollToCardId={_scrollToCardId} {detailPanelOpen} />
-										{/if}
-									</div>
-								{/each}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				{/each}
-			{:else}
-				<!-- Default column layout (newest / oldest) -->
-				<div class="flex flex-wrap gap-4">
-					{#each columns as col}
-						<div class="flex w-[320px] flex-col gap-4">
-							{#each col as group (group.entity_id)}
-								<div data-entity-id={group.entity_id}>
-									{#if group.card_count === 1}
-										<ActionCardComponent card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} onlink={handleLinkCard} selectedCardId={selectedCard?.card_id ?? ''} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-									{:else}
-										<CardGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} scrollToCardId={_scrollToCardId} {detailPanelOpen} />
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/each}
-				</div>
-			{/if}
-			{#if hasMoreGroups && $feedViewMode !== 'timeline'}
-				<!-- Group pagination: load the next page of groups (P4-9). Sits below
-				     both list and card views; the timeline carries its own control in
-				     the control strip (it has no scroll room below the lanes). -->
-				<div class="flex w-full justify-center py-6">
-					<button
-						class="rounded-lg border border-surface-600 bg-surface-800 px-6 py-2.5 text-laya-base font-medium text-surface-200 transition-colors hover:border-laya-orange/40 hover:bg-surface-700 disabled:cursor-not-allowed disabled:opacity-60"
-						onclick={loadMoreGroups}
-						disabled={loadingMoreGroups}
-					>
-						{loadingMoreGroups ? 'Loading…' : `Load more (${totalGroups - groups.length} more)`}
-					</button>
-				</div>
+			<!-- ── LIST / CARD VIEW ── -->
+			{:else if $feedViewMode === 'list' || $feedViewMode === 'card'}
+				<FeedGroupsView
+					viewMode={$feedViewMode}
+					{filteredGroups}
+					{sections}
+					{columns}
+					{toColumns}
+					{collapsedSections}
+					ontogglesection={toggleSection}
+					{exitingCardIds}
+					selectedCardId={selectedCard?.card_id ?? ''}
+					{selectedEntityId}
+					scrollToCardId={_scrollToCardId}
+					bulkSelectedIds={$feedSelection}
+					hasSelection={hasAnySelection}
+					lastViewedCardId={lastViewedCardId ?? ''}
+					lastViewedEntityId={lastViewedEntityId ?? ''}
+					{detailPanelOpen}
+					onselect={selectCard}
+					onselectgroup={selectGroupSummary}
+					ondelete={handleDelete}
+					onlinkgroup={handleLinkGroup}
+					onlinkcard={handleLinkCard}
+					onbulktoggle={handleBulkToggle}
+					onbulktogglegroup={handleBulkToggleGroup}
+					hasMoreGroups={hasMoreGroups}
+					{loadingMoreGroups}
+					remainingCount={Math.max(0, totalGroups - groups.length)}
+					onloadmore={loadMoreGroups}
+				/>
 			{/if}
 		</div>
 
