@@ -13,7 +13,7 @@ from typing import Any
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
 from laya.models.classification import RouterOutput
@@ -369,7 +369,7 @@ async def _exec_set_priority(action: SetPriorityAction, card_id: str) -> dict[st
         (action.priority, card_id),
     )
     await db.commit()
-    await manager.broadcast({"type": "card_updated", "card_id": card_id, "payload": {"priority": action.priority}})
+    await publish({"type": "card_updated", "card_id": card_id, "payload": {"priority": action.priority}})
     return {"success": True, "priority": action.priority}
 
 
@@ -381,7 +381,7 @@ async def _exec_bookmark(card_id: str) -> dict[str, Any]:
         (now, card_id),
     )
     await db.commit()
-    await manager.broadcast({"type": "card_updated", "card_id": card_id, "payload": {"bookmarked": True}})
+    await publish({"type": "card_updated", "card_id": card_id, "payload": {"bookmarked": True}})
     return {"success": True, "bookmarked": True}
 
 
@@ -490,7 +490,7 @@ async def _exec_run_agent(
                 pass
 
             for card_row in card_rows:
-                await manager.broadcast(
+                await publish(
                     {"type": "card_updated", "card_id": card_row["card_id"], "payload": {"has_workspace": True}}
                 )
 
@@ -539,7 +539,7 @@ async def _exec_notification(
 ) -> dict[str, Any]:
     title = _resolve_template(action.title_template, context)
     body = _resolve_template(action.body_template, context)
-    await manager.broadcast({
+    await publish({
         "type": "push_notification",
         "payload": {"title": title, "body": body, "card_id": card_id},
     })
@@ -583,7 +583,7 @@ async def _exec_add_tag(action: AddTagAction, card_id: str) -> dict[str, Any]:
     except Exception as e:
         log.warning("rule_tag_chromadb_failed", card_id=card_id, error=str(e))
 
-    await manager.broadcast({
+    await publish({
         "type": "tags_changed",
         "payload": {"target_type": "card", "target_id": card_id, "tag_name": tag_name, "action": "assigned"},
     })
@@ -735,7 +735,7 @@ async def run_processing_rules(
 
             if auto_disable:
                 log.warning("processing_rule_auto_disabled", rule_id=rule_id, rule=rule_name, consecutive_errors=new_error_count)
-                await manager.broadcast({
+                await publish({
                     "type": "processing_rule_auto_disabled",
                     "payload": {"rule_id": rule_id, "name": rule_name, "reason": f"{new_error_count} consecutive errors"},
                 })
