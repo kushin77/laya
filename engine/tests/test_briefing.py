@@ -35,8 +35,7 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        return_value=_mock_briefing_response()):
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
 
@@ -62,8 +61,7 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        return_value=_mock_briefing_response()) as mock_llm:
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
 
@@ -84,8 +82,7 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        return_value=_mock_briefing_response()):
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
 
@@ -100,15 +97,14 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        return_value=_mock_briefing_response()):
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         await generate_briefing()
 
-        mock_mgr.broadcast.assert_called()
+        mock_mgr.assert_called()
         # The last broadcast call should be the briefing_ready message
         # (emit also broadcasts card_created before it)
-        calls = mock_mgr.broadcast.call_args_list
+        calls = mock_mgr.call_args_list
         briefing_call = [c for c in calls if c[0][0].get("type") == "briefing_ready"]
         assert len(briefing_call) == 1
         assert briefing_call[0][0][0]["type"] == "briefing_ready"
@@ -124,8 +120,7 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        side_effect=Exception("LLM down")):
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
 
@@ -145,8 +140,7 @@ class TestBriefingPipeline:
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
             with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
                        return_value=_mock_briefing_response()):
-                with patch("laya.pipeline.briefing.manager") as mock_mgr:
-                    mock_mgr.broadcast = AsyncMock()
+                with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id_1 = await generate_briefing()
                         card_id_2 = await generate_briefing()
