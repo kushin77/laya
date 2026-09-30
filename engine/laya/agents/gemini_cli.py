@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, AsyncIterator
 
 import structlog
 
 from laya.agents.base import BaseCodingAgent
+from laya.agents.cli_protocol import classify_tool, is_approval_prompt
 from laya.agents.subprocess_helper import AgentProcess, strip_ansi
 from laya.models.workspace import (
     SessionStatus,
@@ -21,12 +21,6 @@ from laya.models.workspace import (
 )
 
 log = structlog.get_logger()
-
-APPROVAL_PATTERNS = [
-    re.compile(r"Do you want to (proceed|continue)\?", re.IGNORECASE),
-    re.compile(r"\[Y/n\]", re.IGNORECASE),
-    re.compile(r"\(y/N\)", re.IGNORECASE),
-]
 
 
 class GeminiCliAgent(BaseCodingAgent):
@@ -167,7 +161,7 @@ class GeminiCliAgent(BaseCodingAgent):
                 yield flushed
 
             # Check for approval prompts in plain-text lines
-            if any(p.search(line) for p in APPROVAL_PATTERNS):
+            if is_approval_prompt(line):
                 self._status = SessionStatus.AWAITING_INPUT
                 yield self._make_event(
                     WorkspaceEventType.APPROVAL_REQUEST,
@@ -341,12 +335,11 @@ class GeminiCliAgent(BaseCodingAgent):
             {"text": text},
         )
 
-    @staticmethod
-    def _classify_tool(tool_name: str) -> WorkspaceEventType:
+    _READ_TOOL_NAMES = ("read_file", "ReadFile", "Read")
+    _WRITE_TOOL_NAMES = ("write_file", "WriteFile", "Write", "edit_file", "Edit", "replace_in_file")
+
+    @classmethod
+    def _classify_tool(cls, tool_name: str) -> WorkspaceEventType:
         """Map a Gemini tool name to the appropriate WorkspaceEventType."""
-        if tool_name in ("read_file", "ReadFile", "Read"):
-            return WorkspaceEventType.FILE_READ
-        if tool_name in ("write_file", "WriteFile", "Write", "edit_file", "Edit", "replace_in_file"):
-            return WorkspaceEventType.FILE_WRITE
-        return WorkspaceEventType.TOOL_CALL
+        return classify_tool(tool_name, cls._READ_TOOL_NAMES, cls._WRITE_TOOL_NAMES)
 
