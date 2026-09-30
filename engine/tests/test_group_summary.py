@@ -74,9 +74,8 @@ async def test_initial_generation(db, mock_llm_response):
 
     no_debounce = {"group_summary_seconds": 0, "daily_summary_seconds": 30, "event_batch_window_seconds": 3, "event_batch_max_size": 10}
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=mock_llm_response), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws, \
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws, \
          patch("laya.pipeline.group_summary.get_debounce_config", return_value=no_debounce):
-        mock_ws.broadcast = AsyncMock()
 
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "card_2", "default")
@@ -132,9 +131,8 @@ async def test_rolling_update(db, mock_llm_response):
 
     no_debounce = {"group_summary_seconds": 0, "daily_summary_seconds": 30, "event_batch_window_seconds": 3, "event_batch_max_size": 10}
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=updated_response), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws, \
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws, \
          patch("laya.pipeline.group_summary.get_debounce_config", return_value=no_debounce):
-        mock_ws.broadcast = AsyncMock()
 
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "card_3", "default")
@@ -156,7 +154,7 @@ async def test_no_summary_for_single_card(db, mock_llm_response):
     await _insert_card(db, "solo_card", entity_id, "Single card", "Just one event")
 
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=mock_llm_response) as mock_llm, \
-         patch("laya.pipeline.group_summary.manager"):
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock):
 
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "solo_card", "default")
@@ -182,7 +180,7 @@ async def test_disabled_setting(db, mock_llm_response):
 
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock) as mock_llm, \
          patch("laya.pipeline.group_summary.load_settings", return_value=disabled_settings), \
-         patch("laya.pipeline.group_summary.manager"):
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock):
 
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "off_2", "default")
@@ -199,8 +197,7 @@ async def test_regenerate_group_summary(db, mock_llm_response):
     await _insert_card(db, "regen_3", entity_id, "Card 3", "Third event")
 
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=mock_llm_response), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws:
-        mock_ws.broadcast = AsyncMock()
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws:
 
         from laya.pipeline.group_summary import regenerate_group_summary
         result = await regenerate_group_summary(entity_id)
@@ -219,15 +216,14 @@ async def test_websocket_broadcast(db, mock_llm_response):
 
     no_debounce = {"group_summary_seconds": 0, "daily_summary_seconds": 30, "event_batch_window_seconds": 3, "event_batch_max_size": 10}
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=mock_llm_response), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws, \
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws, \
          patch("laya.pipeline.group_summary.get_debounce_config", return_value=no_debounce):
-        mock_ws.broadcast = AsyncMock()
 
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "ws_2", "default")
 
-    mock_ws.broadcast.assert_called_once()
-    call_args = mock_ws.broadcast.call_args[0][0]
+    mock_ws.assert_called_once()
+    call_args = mock_ws.call_args[0][0]
     assert call_args["type"] == "group_summary_updated"
     assert call_args["entity_id"] == entity_id
     assert "summary" in call_args
@@ -362,10 +358,9 @@ async def test_rolling_update_skips_cascade_when_unchanged(db, mock_llm_response
     resp.model = "claude-haiku-4-5"
     no_debounce = {"group_summary_seconds": 0, "daily_summary_seconds": 30, "event_batch_window_seconds": 3, "event_batch_max_size": 10}
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=resp), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws, \
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws, \
          patch("laya.pipeline.group_summary.get_debounce_config", return_value=no_debounce), \
          patch("laya.pipeline.group_summary._cascade_to_context_group", new_callable=AsyncMock) as mock_cascade:
-        mock_ws.broadcast = AsyncMock()
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "u3", "default")
     mock_cascade.assert_not_called()
@@ -391,10 +386,9 @@ async def test_rolling_update_cascades_when_headline_changes(db, mock_llm_respon
     resp.model = "claude-haiku-4-5"
     no_debounce = {"group_summary_seconds": 0, "daily_summary_seconds": 30, "event_batch_window_seconds": 3, "event_batch_max_size": 10}
     with patch("laya.pipeline.group_summary.llm_call", new_callable=AsyncMock, return_value=resp), \
-         patch("laya.pipeline.group_summary.manager") as mock_ws, \
+         patch("laya.pipeline.group_summary.publish", new_callable=AsyncMock) as mock_ws, \
          patch("laya.pipeline.group_summary.get_debounce_config", return_value=no_debounce), \
          patch("laya.pipeline.group_summary._cascade_to_context_group", new_callable=AsyncMock) as mock_cascade:
-        mock_ws.broadcast = AsyncMock()
         from laya.pipeline.group_summary import trigger_group_summary_update
         await trigger_group_summary_update(entity_id, "v3", "default")
     mock_cascade.assert_called_once()
