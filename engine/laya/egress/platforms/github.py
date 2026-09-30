@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 import re
 
 from laya.egress.models import EgressCapability
@@ -288,6 +290,27 @@ class GithubPlatform(Platform):
                 errors.append("Missing 'base' branch")
 
         return errors
+
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate GitHub PAT by calling GET /user."""
+        token = credentials.get("accessToken", "")
+        if not token:
+            return False, "Missing accessToken"
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                timeout=10.0,
+            )
+
+        if resp.status_code == 200:
+            return True, None
+        elif resp.status_code == 401:
+            return False, "Invalid or expired token"
+        else:
+            return False, f"GitHub returned HTTP {resp.status_code}"
 
 
 PLATFORM = GithubPlatform()
