@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 from laya.egress.models import EgressCapability
 from laya.egress.platforms.base import Platform
 
@@ -192,6 +194,32 @@ class JiraPlatform(Platform):
                 errors.append("Missing 'assignee'")
 
         return errors
+
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate Jira credentials by calling GET /rest/api/3/myself."""
+        domain = credentials.get("domain", "").strip().rstrip("/")
+        email = credentials.get("email", "").strip()
+        token = credentials.get("apiToken", "")
+
+        if not all([domain, email, token]):
+            return False, "Missing required fields: domain, email, apiToken"
+
+        if not domain.startswith(("http://", "https://")):
+            return False, "Domain must start with https:// (e.g. https://your-company.atlassian.net)"
+
+        url = f"{domain}/rest/api/3/myself"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, auth=(email, token), timeout=10.0)
+
+        if resp.status_code == 200:
+            return True, None
+        elif resp.status_code == 401:
+            return False, "Invalid credentials — check email and API token"
+        elif resp.status_code == 403:
+            return False, "Credentials valid but insufficient permissions"
+        else:
+            return False, f"Jira returned HTTP {resp.status_code}"
 
 
 PLATFORM = JiraPlatform()
