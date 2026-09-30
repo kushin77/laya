@@ -658,3 +658,60 @@ async def test_streaming_applies_max_tokens_clamp(db):
 
     assert captured["stream"] is True
     assert captured["max_tokens"] == 8192  # clamped from DEFAULT_MAX_TOKENS (65536)
+
+
+# --- Pipeline hook injection (#14) ---
+
+
+@pytest.mark.asyncio
+async def test_configure_pipeline_hooks_invoked_and_timeout_applied():
+    """llm/client.py takes no direct pipeline import; the pipeline layer injects
+    its budget/timeout/retry behavior via configure_pipeline_hooks (#14). This
+    exercises the actual hook seam rather than only the no-hooks-registered
+    fallback the rest of this file's tests run under."""
+    import laya.llm.client as client_module
+
+    on_complete_calls = []
+    mock_ac = AsyncMock(return_value=_mock_acompletion_response())
+
+    client_module.configure_pipeline_hooks(
+        on_complete=lambda result: on_complete_calls.append(result),
+        model_timeout=lambda: 111.0,
+        llm_retries=lambda: 1,
+    )
+    try:
+        with patch("litellm.acompletion", mock_ac):
+            with patch(
+                "laya.llm.model_resolution.load_settings",
+                return_value={"models": {"router": "claude-haiku-4-5-20251001"}},
+            ):
+                result = await llm_call(
+                    role="router",
+                    messages=[{"role": "user", "content": "hi"}],
+                    step="route",
+                )
+    finally:
+        client_module.configure_pipeline_hooks()  # reset — global state, must not leak
+
+    assert mock_ac.call_args.kwargs["timeout"] == 111.0
+    assert len(on_complete_calls) == 1
+    assert on_complete_calls[0] is result
+
+
+@pytest.mark.asyncio
+async def test_llm_call_works_with_no_hooks_registered():
+    """When the pipeline layer never calls configure_pipeline_hooks (e.g. a
+    standalone script), llm_call must still work via its own defaults rather
+    than raising for a missing pipeline import."""
+    import laya.llm.client as client_module
+
+    client_module.configure_pipeline_hooks()  # ensure a clean slate
+    mock_ac = AsyncMock(return_value=_mock_acompletion_response())
+    with patch("litellm.acompletion", mock_ac):
+        with patch(
+            "laya.llm.model_resolution.load_settings",
+            return_value={"models": {"router": "claude-haiku-4-5-20251001"}},
+        ):
+            await llm_call(role="router", messages=[{"role": "user", "content": "hi"}], step="route")
+
+    assert mock_ac.call_args.kwargs["timeout"] == client_module._DEFAULT_MODEL_TIMEOUT
