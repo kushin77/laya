@@ -95,7 +95,7 @@ async def test_router_can_classify_as_sales(db, slack_event, mock_chromadb):
 
     with patch("laya.pipeline.feedback.query_feedback_patterns", new_callable=AsyncMock, return_value=[]):
         with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                         result = await run_router(slack_event, "external")
@@ -136,7 +136,7 @@ async def test_router_clears_research_plan_when_not_required(db, slack_event, mo
 
     with patch("laya.pipeline.feedback.query_feedback_patterns", new_callable=AsyncMock, return_value=[]):
         with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                         result = await run_router(slack_event, "teammate")
@@ -152,7 +152,7 @@ async def test_router_handles_llm_failure(db, sample_event, mock_chromadb):
 
     with patch("laya.pipeline.feedback.query_feedback_patterns", new_callable=AsyncMock, return_value=[]):
         with patch("litellm.acompletion", new_callable=AsyncMock, side_effect=Exception("API down")):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with pytest.raises(Exception, match="API down"):
                     await run_router(sample_event, "teammate")
 
@@ -173,7 +173,7 @@ async def test_router_handles_malformed_json(db, sample_event, mock_chromadb):
 
     with patch("laya.pipeline.feedback.query_feedback_patterns", new_callable=AsyncMock, return_value=[]):
         with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                         result = await run_router(sample_event, "teammate")
