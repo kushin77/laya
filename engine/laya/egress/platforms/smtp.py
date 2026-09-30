@@ -54,5 +54,31 @@ class SmtpPlatform(Platform):
     def validate_payload(self, action_type: str, payload: dict) -> list[str]:
         return []
 
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate SMTP credentials by connecting and authenticating."""
+        try:
+            import aiosmtplib
+
+            port = int(credentials.get("smtp_port", 587))
+            use_tls = credentials.get("use_tls", True)
+
+            # Port 465 = implicit TLS (use_tls=True, no STARTTLS needed)
+            # Port 587 = STARTTLS (start_tls=True handles the upgrade automatically)
+            # Port 25  = plain (no TLS)
+            smtp = aiosmtplib.SMTP(
+                hostname=credentials.get("smtp_host", ""),
+                port=port,
+                use_tls=(use_tls and port == 465),
+                start_tls=(use_tls and port != 465),
+            )
+            await smtp.connect()
+            await smtp.login(credentials.get("username", ""), credentials.get("password", ""))
+            await smtp.quit()
+            return True, None
+        except ImportError:
+            return False, "aiosmtplib not installed — SMTP support unavailable"
+        except Exception as e:
+            return False, f"SMTP connection failed: {str(e)}"
+
 
 PLATFORM = SmtpPlatform()
