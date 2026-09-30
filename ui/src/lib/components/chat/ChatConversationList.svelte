@@ -2,14 +2,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script lang="ts">
 	import { engineApi } from '$lib/api/engine';
-	import {
-		conversations,
-		activeConversationId,
-		chatListOpen,
-		chatMessages,
-		chatOpen,
-		chatExpanded
-	} from '$lib/stores/chat';
+	import { chatSession, chatListOpen, chatOpen, chatExpanded } from '$lib/stores/chat';
 	import { applyLoadedMessages } from '$lib/stores/chatStream';
 	import type { Conversation } from '$lib/api/types';
 	import { parseBackendDate } from '$lib/utils/datetime';
@@ -25,7 +18,7 @@
 		loading = true;
 		try {
 			const list = await engineApi.getConversations(100);
-			conversations.set(list);
+			chatSession.update((s) => ({ ...s, conversations: list }));
 		} catch {
 			// silently fail
 		}
@@ -48,7 +41,7 @@
 	async function openConversation(conv: Conversation) {
 		// Don't navigate away while the user is renaming this row
 		if (editingId === conv.conversation_id) return;
-		activeConversationId.set(conv.conversation_id);
+		chatSession.update((s) => ({ ...s, activeConversationId: conv.conversation_id }));
 		chatListOpen.set(false);
 		// Load messages for this conversation. Merge-aware: a reply may still be
 		// streaming into this conversation (its DB row lags the live content),
@@ -57,7 +50,7 @@
 			const msgs = await engineApi.getConversationMessages(conv.conversation_id, 50);
 			applyLoadedMessages(conv.conversation_id, msgs.reverse());
 		} catch {
-			chatMessages.set([]);
+			chatSession.update((s) => ({ ...s, messages: [] }));
 		}
 	}
 
@@ -75,21 +68,27 @@
 
 		// Grab the prior title so we can revert if the API call fails
 		let prior = '';
-		conversations.update((list) => {
-			const found = list.find((c) => c.conversation_id === convId);
+		chatSession.update((s) => {
+			const found = s.conversations.find((c) => c.conversation_id === convId);
 			prior = found?.title ?? '';
-			return list.map((c) =>
-				c.conversation_id === convId ? { ...c, title: trimmed } : c
-			);
+			return {
+				...s,
+				conversations: s.conversations.map((c) =>
+					c.conversation_id === convId ? { ...c, title: trimmed } : c
+				)
+			};
 		});
 		if (prior === trimmed) return;
 
 		try {
 			await engineApi.renameConversation(convId, trimmed);
 		} catch {
-			conversations.update((list) =>
-				list.map((c) => (c.conversation_id === convId ? { ...c, title: prior } : c))
-			);
+			chatSession.update((s) => ({
+				...s,
+				conversations: s.conversations.map((c) =>
+					c.conversation_id === convId ? { ...c, title: prior } : c
+				)
+			}));
 		}
 	}
 
@@ -110,14 +109,16 @@
 	async function startNewChat() {
 		try {
 			const conv = await engineApi.createConversation();
-			conversations.update((list) => [conv, ...list]);
-			activeConversationId.set(conv.conversation_id);
-			chatMessages.set([]);
+			chatSession.update((s) => ({
+				...s,
+				conversations: [conv, ...s.conversations],
+				activeConversationId: conv.conversation_id,
+				messages: []
+			}));
 			chatListOpen.set(false);
 		} catch {
 			// fallback: just open empty chat with no conversation (will auto-create on first message)
-			activeConversationId.set(null);
-			chatMessages.set([]);
+			chatSession.update((s) => ({ ...s, activeConversationId: null, messages: [] }));
 			chatListOpen.set(false);
 		}
 	}
@@ -128,9 +129,12 @@
 			// Second click = confirm
 			try {
 				await engineApi.deleteConversation(convId);
-				conversations.update((list) => list.filter((c) => c.conversation_id !== convId));
-				// If we deleted the active conversation, clear it
-				activeConversationId.update((id) => (id === convId ? null : id));
+				chatSession.update((s) => ({
+					...s,
+					conversations: s.conversations.filter((c) => c.conversation_id !== convId),
+					// If we deleted the active conversation, clear it
+					activeConversationId: s.activeConversationId === convId ? null : s.activeConversationId
+				}));
 			} catch {
 				// ignore
 			}
@@ -215,7 +219,7 @@
 	<div class="flex-1 overflow-auto">
 		{#if loading}
 			<p class="p-4 text-center text-laya-base text-surface-500">Loading...</p>
-		{:else if $conversations.length === 0}
+		{:else if $chatSession.conversations.length === 0}
 			<div class="flex flex-col items-center gap-3 p-8 text-center">
 				<svg class="h-10 w-10 text-surface-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -230,7 +234,7 @@
 			</div>
 		{:else}
 			<div class="p-2">
-				{#each $conversations as conv (conv.conversation_id)}
+				{#each $chatSession.conversations as conv (conv.conversation_id)}
 					<div
 						role="button"
 						tabindex="0"
