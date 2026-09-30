@@ -11,6 +11,8 @@ on:
       - 'engine/requirements*'
       - 'scripts/lock-deps.sh'
       - 'scripts/check-locks.sh'
+      - 'scripts/check-lock-sync.sh'
+      - 'scripts/check-ml-upper-bounds.py'
       - 'scripts/smoke-install.sh'
       - 'scripts/check-embedding.py'
       - 'ui/src-tauri/src/sidecar.rs'
@@ -22,6 +24,8 @@ on:
       - 'engine/requirements*'
       - 'scripts/lock-deps.sh'
       - 'scripts/check-locks.sh'
+      - 'scripts/check-lock-sync.sh'
+      - 'scripts/check-ml-upper-bounds.py'
       - 'scripts/smoke-install.sh'
       - 'scripts/check-embedding.py'
       - '.github/workflows/engine-deps.yml'
@@ -54,23 +58,7 @@ jobs:
         run: scripts/check-locks.sh -v
 
       - name: Locks are in step with the requirements files
-        # Compares pinned versions only: upstream can add wheels (and so
-        # hashes) to an existing release, which changes the hash lists of a
-        # regenerated lock without changing what gets installed.
-        run: |
-          pins() { grep -E '^[A-Za-z0-9_.-]+==' "$1" | sed -E 's/ *\\$//'; }
-          for f in requirements.lock requirements-ml.lock requirements-dev.lock; do
-            pins "engine/$f" > "/tmp/$f.committed"
-          done
-          scripts/lock-deps.sh
-          status=0
-          for f in requirements.lock requirements-ml.lock requirements-dev.lock; do
-            if ! diff -u "/tmp/$f.committed" <(pins "engine/$f"); then
-              echo "::error file=engine/$f::$f is out of date. Run scripts/lock-deps.sh and commit the result."
-              status=1
-            fi
-          done
-          exit $status
+        run: scripts/check-lock-sync.sh
 
   smoke:
     name: Install (${{ matrix.os }}, Python ${{ matrix.python }})
@@ -137,3 +125,8 @@ jobs:
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
         run: scripts/smoke-install.sh --python "$PYTHON" --source ranges --ml
+
+      - name: ML dependency upper bounds are still verified
+        # Catches a bumped `<X` bound in requirements-ml.txt that nobody
+        # re-verified against the breakage the comment next to it documents.
+        run: python3 scripts/check-ml-upper-bounds.py
