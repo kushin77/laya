@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, AsyncIterator
 
 import structlog
 
 from laya.agents.base import BaseCodingAgent
+from laya.agents.cli_protocol import classify_tool, is_approval_prompt
 from laya.agents.subprocess_helper import AgentProcess, strip_ansi
 from laya.models.workspace import (
     SessionStatus,
@@ -21,12 +21,6 @@ from laya.models.workspace import (
 )
 
 log = structlog.get_logger()
-
-APPROVAL_PATTERNS = [
-    re.compile(r"Do you want to (proceed|continue)\?", re.IGNORECASE),
-    re.compile(r"\[Y/n\]", re.IGNORECASE),
-    re.compile(r"\(y/N\)", re.IGNORECASE),
-]
 
 
 class PiCliAgent(BaseCodingAgent):
@@ -138,7 +132,7 @@ class PiCliAgent(BaseCodingAgent):
             if flushed:
                 yield flushed
 
-            if any(p.search(line) for p in APPROVAL_PATTERNS):
+            if is_approval_prompt(line):
                 self._status = SessionStatus.AWAITING_INPUT
                 yield self._make_event(
                     WorkspaceEventType.APPROVAL_REQUEST,
@@ -461,16 +455,15 @@ class PiCliAgent(BaseCodingAgent):
             {"text": text},
         )
 
-    @staticmethod
-    def _classify_tool(tool_name: str) -> WorkspaceEventType:
+    _READ_TOOL_NAMES = ("read", "Read", "ReadFile", "read_file")
+    _WRITE_TOOL_NAMES = ("write", "Write", "edit", "Edit", "WriteFile", "edit_file")
+
+    @classmethod
+    def _classify_tool(cls, tool_name: str) -> WorkspaceEventType:
         """Map a Pi tool name to the appropriate WorkspaceEventType.
 
         Pi's built-in tools use lowercase names: read, bash, edit, write,
         grep, find, ls.
         """
-        if tool_name in ("read", "Read", "ReadFile", "read_file"):
-            return WorkspaceEventType.FILE_READ
-        if tool_name in ("write", "Write", "edit", "Edit", "WriteFile", "edit_file"):
-            return WorkspaceEventType.FILE_WRITE
-        return WorkspaceEventType.TOOL_CALL
+        return classify_tool(tool_name, cls._READ_TOOL_NAMES, cls._WRITE_TOOL_NAMES)
 
