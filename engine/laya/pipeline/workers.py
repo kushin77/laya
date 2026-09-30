@@ -9,6 +9,7 @@ import structlog
 
 from laya.models.classification import Persona, RouterOutput
 from laya.models.event import LayaEvent
+from laya.pipeline.related_context import query_related_context
 from laya.workers.base import WorkerResult
 from laya.workers.engineer import run_engineer
 from laya.workers.persona import PERSONA_SPECS, run_persona_worker
@@ -83,7 +84,10 @@ async def _dispatch_worker(
     """Dispatch to the appropriate worker based on persona."""
     try:
         if persona == Persona.ENGINEER:
-            return await run_engineer(event, router_output, card_id=card_id, space_id=space_id)
+            related_context = await query_related_context(event, n_results=5)
+            return await run_engineer(
+                event, router_output, related_context, card_id=card_id, space_id=space_id
+            )
 
         # COMMS/OPS/SALES/HR/FINANCE are all the same spec-driven drafting worker;
         # each spec declares its prompt/schema and whether it takes role-aware
@@ -91,8 +95,10 @@ async def _dispatch_worker(
         # ops/finance behave exactly as before). See workers/persona.py (P7-2).
         spec = PERSONA_SPECS.get(persona.value)
         if spec is not None:
+            # Shared per-event memoized search — reuses the router/stager embedding (P6-7).
+            related_context = await query_related_context(event, n_results=spec.n_results)
             return await run_persona_worker(
-                spec, event, router_output,
+                spec, event, router_output, related_context,
                 prior_findings=prior_findings, card_id=card_id,
                 user_identity=user_identity, actor_relationship=actor_relationship,
                 participant_roles=participant_roles,
