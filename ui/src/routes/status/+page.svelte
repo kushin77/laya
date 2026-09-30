@@ -5,6 +5,7 @@
 	import { health, healthError } from '$lib/stores/health';
 	import { wsStatus, lastMessage } from '$lib/stores/websocket';
 	import { engineApi } from '$lib/api/engine';
+	import { invokeSafe } from '$lib/tauri';
 	import { glassTheme } from '$lib/stores/glassTheme';
 	import type { DashboardResponse, ThroughputResponse } from '$lib/api/types';
 	import StatCard from '$lib/components/dashboard/StatCard.svelte';
@@ -33,23 +34,14 @@
 	let n8nAction = $state('');
 	let wsExpanded = $state(false);
 
-	async function invoke(cmd: string): Promise<any> {
-		try {
-			const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
-			return await tauriInvoke(cmd);
-		} catch {
-			return null;
-		}
-	}
-
 	async function checkN8nProcess() {
-		const status = await invoke('n8n_status');
+		const status = await invokeSafe<string>('n8n_status');
 		n8nProcessStatus = status ?? 'unknown';
 	}
 
 	async function startN8n() {
 		n8nAction = 'starting';
-		await invoke('start_n8n');
+		await invokeSafe('start_n8n');
 		await new Promise((r) => setTimeout(r, 2000));
 		await checkN8nProcess();
 		n8nAction = '';
@@ -57,7 +49,7 @@
 
 	async function stopN8n() {
 		n8nAction = 'stopping';
-		await invoke('stop_n8n');
+		await invokeSafe('stop_n8n');
 		await new Promise((r) => setTimeout(r, 1000));
 		await checkN8nProcess();
 		n8nAction = '';
