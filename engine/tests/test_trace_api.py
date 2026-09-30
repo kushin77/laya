@@ -234,7 +234,7 @@ class TestTraceRerun:
             enable_llm_filter=False,
             fuzzy_search=False,
         )
-        with patch("laya.pipeline.trace.manager.broadcast", new_callable=AsyncMock) as bc:
+        with patch("laya.pipeline.trace.publish", new_callable=AsyncMock) as bc:
             response = await run_trace(request, trace_id="trace_ws")
 
         completes = [
