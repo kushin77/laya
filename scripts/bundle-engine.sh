@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bundle engine Python source and n8n workflows into Tauri resources.
+# Bundle engine Python source into Tauri resources.
 # Used by both build.sh (local builds) and CI (GitHub Actions).
 #
 # Usage:
@@ -29,12 +29,6 @@ cp "$REPO_ROOT/engine/requirements-ml.txt" "$ENGINE_BUNDLE/requirements-ml.txt"
 # the requirements files above are what it resolves if a lock cannot be used.
 cp "$REPO_ROOT/engine/requirements.lock" "$ENGINE_BUNDLE/requirements.lock"
 cp "$REPO_ROOT/engine/requirements-ml.lock" "$ENGINE_BUNDLE/requirements-ml.lock"
-
-# Copy n8n workflows (imported into n8n on first run)
-if [ -d "$REPO_ROOT/n8n/workflows" ]; then
-    cp -R "$REPO_ROOT/n8n/workflows" "$ENGINE_BUNDLE/n8n_workflows"
-    echo "  $(ls "$ENGINE_BUNDLE/n8n_workflows" | wc -l | tr -d ' ') n8n workflows bundled"
-fi
 
 # Remove any __pycache__ or .pyc files (avoids macOS code signature invalidation)
 find "$ENGINE_BUNDLE" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
