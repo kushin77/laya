@@ -255,6 +255,12 @@ async def lifespan(app: FastAPI):
     # Load API keys from OS keychain into environment
     load_all_keys_to_env()
 
+    # Wire the pipeline's budget/rate-limit/timeout hooks into llm/client.py
+    # (#14) — must run before anything can call llm_call (n8n provisioning,
+    # the consumer, etc. all can).
+    from laya.pipeline.llm_hooks import install as install_llm_hooks
+    install_llm_hooks()
+
     # Ensure an MCP bearer token exists when auth_mode=bearer so the SSE
     # endpoint is immediately usable. Token only generated if missing.
     ensure_mcp_startup_token()
