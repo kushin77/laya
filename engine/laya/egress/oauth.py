@@ -28,6 +28,7 @@ from laya.egress.connections import (
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
 from laya.egress.registry import get_capabilities
+from laya.security.keychain import get_egress_secret, set_egress_secret
 
 log = structlog.get_logger()
 
@@ -126,32 +127,26 @@ def _get_oauth_client(platform: str) -> tuple[str, str] | None:
 
     Returns (client_id, client_secret) or None if not configured.
     """
-    try:
-        import keyring
-
-        raw = keyring.get_password(EGRESS_KEYCHAIN_SERVICE, f"oauth:{platform}:client")
-        if raw:
+    raw = get_egress_secret(EGRESS_KEYCHAIN_SERVICE, f"oauth:{platform}:client")
+    if raw:
+        try:
             data = json.loads(raw)
             return data.get("client_id"), data.get("client_secret")
-    except Exception:
-        pass
+        except Exception:
+            pass
     return None
 
 
 def store_oauth_client(platform: str, client_id: str, client_secret: str) -> bool:
     """Store OAuth client credentials for a platform."""
-    try:
-        import keyring
-
-        keyring.set_password(
-            EGRESS_KEYCHAIN_SERVICE,
-            f"oauth:{platform}:client",
-            json.dumps({"client_id": client_id, "client_secret": client_secret}),
-        )
-        return True
-    except Exception as e:
-        log.error("oauth_client_store_failed", platform=platform, error=str(e))
-        return False
+    ok = set_egress_secret(
+        EGRESS_KEYCHAIN_SERVICE,
+        f"oauth:{platform}:client",
+        json.dumps({"client_id": client_id, "client_secret": client_secret}),
+    )
+    if not ok:
+        log.error("oauth_client_store_failed", platform=platform)
+    return ok
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -446,12 +441,10 @@ async def refresh_access_token(connection_id: str, platform: str) -> bool:
         return False
 
     # Get stored tokens
+    raw = get_egress_secret(EGRESS_KEYCHAIN_SERVICE, f"{platform}:{connection_id}")
+    if not raw:
+        return False
     try:
-        import keyring
-
-        raw = keyring.get_password(EGRESS_KEYCHAIN_SERVICE, f"{platform}:{connection_id}")
-        if not raw:
-            return False
         token_store = json.loads(raw)
     except Exception:
         return False

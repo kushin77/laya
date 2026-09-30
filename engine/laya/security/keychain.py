@@ -216,3 +216,47 @@ def delete_mcp_token() -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Egress secrets (OAuth client credentials, connection credentials, tokens)
+#
+# Callers pass their own service name (e.g. egress's "laya-egress") since
+# these secrets live in a separate keychain service from SERVICE_NAME above.
+# Centralized here so all keyring access goes through one module.
+# ---------------------------------------------------------------------------
+
+
+def get_egress_secret(service: str, key: str) -> str | None:
+    """Retrieve a secret from the OS keychain under the given service/key."""
+    try:
+        import keyring
+
+        return keyring.get_password(service, key)
+    except Exception as e:
+        log.warning("egress_secret_read_failed", service=service, key=key, error=str(e))
+        return None
+
+
+def set_egress_secret(service: str, key: str, value: str) -> bool:
+    """Store a secret in the OS keychain under the given service/key."""
+    try:
+        import keyring
+
+        keyring.set_password(service, key, value)
+        return True
+    except Exception as e:
+        log.error("egress_secret_store_failed", service=service, key=key, error=str(e))
+        return False
+
+
+def delete_egress_secret(service: str, key: str) -> bool:
+    """Remove a secret from the OS keychain under the given service/key."""
+    try:
+        import keyring
+
+        keyring.delete_password(service, key)
+        return True
+    except Exception as e:
+        log.warning("egress_secret_delete_failed", service=service, key=key, error=str(e))
+        return False
