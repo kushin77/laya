@@ -22,7 +22,6 @@ from typing import Any, Callable
 
 import structlog
 
-from laya.pipeline.related_context import query_related_context
 from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
 from laya.llm.prompts.comms import build_comms_messages, get_comms_json_schema
 from laya.llm.prompts.finance import build_finance_messages, get_finance_json_schema
@@ -90,17 +89,19 @@ async def run_persona_worker(
     spec: PersonaSpec,
     event: LayaEvent,
     router_output: RouterOutput,
+    related_context: list[dict],
     prior_findings: dict | None = None,
     card_id: str | None = None,
     user_identity: dict | None = None,
     actor_relationship: str = "external",
     participant_roles: dict | None = None,
 ) -> WorkerResult:
-    """Run one LLM-drafting persona worker (no coding agent — pure LLM drafting)."""
-    log.info("persona_worker_start", persona=spec.persona, event_id=event.event_id)
+    """Run one LLM-drafting persona worker (no coding agent — pure LLM drafting).
 
-    # Shared per-event memoized search — reuses the router/stager embedding (P6-7).
-    related_context = await query_related_context(event, n_results=spec.n_results)
+    ``related_context`` is retrieved by the caller (shared per-event memoized
+    search — reuses the router/stager embedding, P6-7) rather than fetched here.
+    """
+    log.info("persona_worker_start", persona=spec.persona, event_id=event.event_id)
 
     if spec.role_aware:
         messages = spec.build_messages(
