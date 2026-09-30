@@ -15,8 +15,8 @@ from laya.tz import safe_zoneinfo
 
 log = structlog.get_logger()
 
-# Re-use the pricing table from dashboard so costs are consistent.
-from laya.api.dashboard_api import MODEL_PRICING  # noqa: E402
+# Re-use the shared pricing table so costs are consistent across dashboard and pipeline.
+from laya.models.pricing import MODEL_PRICING
 
 # Only models present in MODEL_PRICING (known cloud models) are billed. An
 # unknown model is almost always a local backend (Ollama/LMStudio/custom) or an
