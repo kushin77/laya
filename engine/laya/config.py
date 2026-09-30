@@ -24,6 +24,12 @@ LAYA_REPOS_FILE = LAYA_HOME / "repos.json"
 ENGINE_HOST = os.environ.get("LAYA_ENGINE_HOST", "127.0.0.1")
 ENGINE_PORT = int(os.environ.get("LAYA_ENGINE_PORT", "8420"))
 N8N_URL = "http://127.0.0.1:45678"
+
+# n8n owner account bootstrap defaults (overridable via environment). The
+# password override is only needed on a *fresh* n8n install; when unset,
+# n8n_bootstrap.py generates a random one and persists it to the OS keychain.
+N8N_OWNER_EMAIL = os.environ.get("LAYA_N8N_OWNER_EMAIL", "laya@local.host")
+N8N_OWNER_PASSWORD_OVERRIDE = os.environ.get("LAYA_N8N_OWNER_PASSWORD")
 DB_PATH = LAYA_DATA_DIR / "laya.db"
 MIGRATIONS_DIR = Path(__file__).parent / "db" / "migrations"
 

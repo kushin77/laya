@@ -7,14 +7,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import secrets
 from pathlib import Path
 
 import httpx
 import structlog
 
-from laya.config import LAYA_DATA_DIR, get_n8n_config
+from laya.config import (
+    LAYA_DATA_DIR,
+    N8N_OWNER_EMAIL,
+    N8N_OWNER_PASSWORD_OVERRIDE,
+    get_n8n_config,
+)
 from laya.http_client import get_client
 from laya.security.keychain import get_api_key, has_api_key, store_api_key
 
@@ -26,8 +30,8 @@ log = structlog.get_logger()
 # literal was repo-public — n8n holds every connected platform's OAuth tokens
 # and can run arbitrary code via its nodes, so any local process (or a
 # DNS-rebinding page, since n8n doesn't validate Host) could log in (review §1.5).
-_DEFAULT_EMAIL = os.environ.get("LAYA_N8N_OWNER_EMAIL", "laya@local.host")
-_ENV_PASSWORD = os.environ.get("LAYA_N8N_OWNER_PASSWORD")  # optional operator override
+_DEFAULT_EMAIL = N8N_OWNER_EMAIL
+_ENV_PASSWORD = N8N_OWNER_PASSWORD_OVERRIDE  # optional operator override
 _DEFAULT_FIRST_NAME = "Laya"
 _DEFAULT_LAST_NAME = "Admin"
 
