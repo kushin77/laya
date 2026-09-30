@@ -59,4 +59,15 @@ class ConnectionManager:
 # Singleton instance
 manager = ConnectionManager()
 
-subscribe(manager.broadcast)
+
+async def _forward_to_manager(message: dict[str, Any]) -> None:
+    """Forward a published event to the connection manager.
+
+    Looks up ``manager.broadcast`` at call time (rather than subscribing the
+    bound method directly) so tests that monkeypatch ``manager.broadcast``
+    still observe the forwarded call.
+    """
+    await manager.broadcast(message)
+
+
+subscribe(_forward_to_manager)
