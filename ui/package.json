@@ -10,11 +10,13 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"lint": "eslint .",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"tauri": "tauri"
 	},
 	"devDependencies": {
+		"@eslint/js": "^10.0.1",
 		"@skeletonlabs/skeleton": "^4.12.0",
 		"@skeletonlabs/skeleton-svelte": "^4.12.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
@@ -25,10 +27,14 @@
 		"@tailwindcss/vite": "^4.2.0",
 		"@tauri-apps/cli": "2.12.0",
 		"@types/dompurify": "^3.0.5",
+		"eslint": "^10.11.0",
+		"eslint-plugin-svelte": "^3.23.0",
+		"globals": "^17.12.0",
 		"svelte": "^5.55.7",
 		"svelte-check": "^4.3.6",
 		"tailwindcss": "^4.3.0",
 		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.71.0",
 		"vite": "^7.3.2",
 		"vitest": "^4.1.10"
 	},
