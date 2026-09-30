@@ -3,12 +3,21 @@
 <script lang="ts">
 	import { agentDialog } from '$lib/stores/agentDialog';
 	import { engineApi } from '$lib/api/engine';
-	import { getEngineUrl, CODING_AGENTS } from '$lib/config';
+	import { CODING_AGENTS } from '$lib/config';
 	import { goto } from '$app/navigation';
 	import { glassTheme } from '$lib/stores/glassTheme';
 	import { portal } from '$lib/actions/portal';
 	import { spaces, loadSpaces } from '$lib/stores/spaces';
 	import { get } from 'svelte/store';
+	import {
+		browseAddDir as browseAddDirAction,
+		uploadFile as uploadFileAction,
+		uploadFileByPath as uploadFileByPathAction,
+		deleteStagedFile,
+		subscribeTauriDragDrop,
+		runAgent as runAgentAction,
+		type UploadedFile
+	} from '$lib/actions/runAgent';
 
 	const AGENT_MODES: Record<string, string[]> = {
 		claude_code: ['plan', 'acceptEdits'],
@@ -35,14 +44,6 @@
 		'full-auto': 'Agent can read and write files automatically',
 		force: 'Edits auto-applied and shell commands run without asking'
 	};
-
-	interface UploadedFile {
-		path: string;
-		filename: string;
-		previewUrl: string | null;
-		contentType: string;
-		isImage: boolean;
-	}
 
 	import type { Repo } from '$lib/api/types';
 
@@ -119,16 +120,9 @@
 	// --- Browse directory using Tauri dialog (graceful fallback for web dev) ---
 
 	async function browseAddDir() {
-		try {
-			const { invoke } = await import('@tauri-apps/api/core');
-			const path = await invoke<string>('pick_folder', {
-				title: 'Select additional directory'
-			});
-			if (path && !addDirs.includes(path)) {
-				addDirs = [...addDirs, path];
-			}
-		} catch {
-			// Not in Tauri — ignore
+		const path = await browseAddDirAction();
+		if (path && !addDirs.includes(path)) {
+			addDirs = [...addDirs, path];
 		}
 	}
 
@@ -142,31 +136,8 @@
 		uploading = true;
 		error = null;
 		try {
-			const formData = new FormData();
-			formData.append('file', file);
-
-			const resp = await fetch('${getEngineUrl()}/upload-agent-file', {
-				method: 'POST',
-				body: formData
-			});
-			if (!resp.ok) {
-				throw new Error(`Upload failed: ${resp.status}`);
-			}
-			const result = await resp.json();
-
-			const contentType: string = result.content_type || file.type || '';
-			const isImage = contentType.startsWith('image/');
-			const previewUrl = isImage ? URL.createObjectURL(file) : null;
-			files = [
-				...files,
-				{
-					path: result.path,
-					filename: result.filename,
-					previewUrl,
-					contentType,
-					isImage
-				}
-			];
+			const uploaded = await uploadFileAction(file);
+			files = [...files, uploaded];
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'File upload failed';
 		} finally {
@@ -174,52 +145,17 @@
 		}
 	}
 
-	// In Tauri on macOS, WKWebView does not emit HTML5 drop events for OS
-	// file drops. We receive the paths from Tauri's native drag-drop event
-	// and send them to a path-based upload endpoint; since the engine is
-	// local, it reads from that path directly.
 	async function uploadFileByPath(path: string) {
 		uploading = true;
 		error = null;
 		try {
-			const resp = await fetch('${getEngineUrl()}/upload-agent-file-path', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ path })
-			});
-			if (!resp.ok) {
-				throw new Error(`Upload failed: ${resp.status}`);
-			}
-			const result = await resp.json();
-			const contentType: string = result.content_type || '';
-			const isImage = contentType.startsWith('image/');
-			files = [
-				...files,
-				{
-					path: result.path,
-					filename: result.filename,
-					previewUrl: null,
-					contentType,
-					isImage
-				}
-			];
+			const uploaded = await uploadFileByPathAction(path);
+			files = [...files, uploaded];
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'File upload failed';
 		} finally {
 			uploading = false;
 		}
-	}
-
-	function deleteStagedFile(path: string) {
-		// Fire-and-forget — UI doesn't need to wait, and the 24h sweep is a
-		// backstop if this ever fails.
-		fetch('${getEngineUrl()}/delete-agent-staging-file', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ path })
-		}).catch(() => {
-			// Ignore — sweep will clean up eventually.
-		});
 	}
 
 	function removeFile(index: number) {
@@ -294,26 +230,16 @@
 		if (!$agentDialog.isOpen) return;
 		let unlisten: (() => void) | undefined;
 		(async () => {
-			try {
-				const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-				const w = getCurrentWebviewWindow();
-				unlisten = await w.onDragDropEvent((event) => {
-					const p = event.payload;
-					if (p.type === 'enter' || p.type === 'over') {
-						dragOver = true;
-					} else if (p.type === 'drop') {
-						dragOver = false;
-						for (const path of p.paths) {
-							uploadFileByPath(path);
-						}
-					} else {
-						dragOver = false;
+			unlisten = await subscribeTauriDragDrop({
+				onDragOver: () => { dragOver = true; },
+				onDrop: (paths) => {
+					dragOver = false;
+					for (const path of paths) {
+						uploadFileByPath(path);
 					}
-				});
-			} catch {
-				// Not running inside Tauri (e.g. Vite dev in a browser) — fine,
-				// HTML5 drop handlers above cover that case.
-			}
+				},
+				onLeave: () => { dragOver = false; }
+			});
 		})();
 		return () => {
 			unlisten?.();
@@ -344,7 +270,7 @@
 		error = null;
 
 		try {
-			const result = await engineApi.runAgent({
+			const result = await runAgentAction({
 				prompt: prompt.trim(),
 				directory: directory.trim() || undefined,
 				add_dirs: addDirs.length > 0 ? addDirs : undefined,
