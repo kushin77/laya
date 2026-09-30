@@ -73,7 +73,7 @@ def _decorate_live(sections: list[dict], meta: dict[str, dict]) -> list[dict]:
     so a CRITICAL that has since been merged still reads CRITICAL. The pipeline
     already computed this for the LLM prompt and threw it away (handoff §B1).
     """
-    from laya.pipeline.omni import _all_resolved, _live_max_priority
+    from laya.pipeline.omni import all_resolved, live_max_priority
 
     for section in sections or []:
         for item in section.get("items", []) or []:
@@ -85,8 +85,8 @@ def _decorate_live(sections: list[dict], meta: dict[str, dict]) -> list[dict]:
                 platform_counts[p] = platform_counts.get(p, 0) + 1
             created = sorted(m["created_at"] for m in known if m.get("created_at"))
             item["live"] = {
-                "max_priority": _live_max_priority(cards, meta),
-                "all_resolved": _all_resolved(cards, meta),
+                "max_priority": live_max_priority(cards, meta),
+                "all_resolved": all_resolved(cards, meta),
                 "resolved_count": sum(
                     1 for m in known if m.get("status") in TERMINAL_STATUSES
                 ),
@@ -113,12 +113,12 @@ async def get_omni(space_id: str = "default", version: int | None = None):
     ``_decorate_live``). Both are computed on read, so snapshots written before
     migration 072 gain them without a backfill.
     """
-    from laya.pipeline.omni import _fetch_card_meta, _load_full_snapshot
+    from laya.pipeline.omni import fetch_card_meta, load_full_snapshot
 
     db = await get_db()
 
     # Reconstruct full state (handles delta chains automatically)
-    content, ver, card_ids, meta = await _load_full_snapshot(db, space_id, version)
+    content, ver, card_ids, meta = await load_full_snapshot(db, space_id, version)
 
     if content is None:
         return {
@@ -135,7 +135,7 @@ async def get_omni(space_id: str = "default", version: int | None = None):
 
     sections = content.get("sections", [])
     decorate_item_keys(sections)
-    card_meta = await _fetch_card_meta(db, _all_item_card_ids(sections))
+    card_meta = await fetch_card_meta(db, _all_item_card_ids(sections))
     _decorate_live(sections, card_meta)
 
     change_rows = await db.execute_fetchall(
@@ -374,11 +374,11 @@ async def trigger_resynthesis(space_id: str = "default"):
     the ``omni_updated`` WebSocket event to know when resynthesis is done.
     """
     import asyncio
-    from laya.pipeline.omni import _get_gate, run_omni_resynthesis
+    from laya.pipeline.omni import get_gate, run_omni_resynthesis
 
     # The resynthesis gate doubles as a concurrency guard: if the gate is
     # cleared (not set), a resynthesis is already running for this space.
-    gate = _get_gate(space_id)
+    gate = get_gate(space_id)
     if not gate.is_set():
         raise HTTPException(
             status_code=409,
@@ -483,10 +483,10 @@ async def resynthesis_status(space_id: str = "default"):
     The schedule fields let the compression instrument show "Next synthesis
     3h 38m" and the item page predict which synthesis will fold a line.
     """
-    from laya.pipeline.omni import _get_gate
+    from laya.pipeline.omni import get_gate
 
     db = await get_db()
-    gate = _get_gate(space_id)
+    gate = get_gate(space_id)
     omni_cfg = load_settings().get("omni", {})
 
     last_rows = await db.execute_fetchall(
@@ -649,12 +649,12 @@ async def _snapshot_states(
     """Reconstructed sections for each of the last `limit` versions up to `upto_version`.
 
     One base reconstruction plus a delta replay, rather than calling
-    `_load_full_snapshot` per version (which would re-walk the whole chain each
+    `load_full_snapshot` per version (which would re-walk the whole chain each
     time — 30 versions of a 20-deep chain is 600 JSON parses for one page open).
     """
     import copy
 
-    from laya.pipeline.omni import _apply_delta, _load_full_snapshot
+    from laya.pipeline.omni import apply_delta, load_full_snapshot
 
     rows = await db.execute_fetchall(
         """SELECT version, generated_at, snapshot_type, content_json, is_delta
@@ -672,7 +672,7 @@ async def _snapshot_states(
     if rows[0]["is_delta"]:
         # The window opens mid-chain; rebuild the state just before it so the
         # first delta has something to apply to.
-        prior, _v, _c, _m = await _load_full_snapshot(db, space_id, rows[0]["version"] - 1)
+        prior, _v, _c, _m = await load_full_snapshot(db, space_id, rows[0]["version"] - 1)
         content = prior or {"sections": []}
     else:
         content = {"sections": []}
@@ -680,10 +680,10 @@ async def _snapshot_states(
     states: list[dict] = []
     for row in rows:
         if row["is_delta"]:
-            content = _apply_delta(content, json.loads(row["content_json"]))
+            content = apply_delta(content, json.loads(row["content_json"]))
         else:
             content = json.loads(row["content_json"])
-        # Deep-copied because _apply_delta mutates `content` in place on the next
+        # Deep-copied because apply_delta mutates `content` in place on the next
         # iteration — holding a reference would rewrite history behind us.
         states.append({
             "version": row["version"],
@@ -728,11 +728,11 @@ async def _locate_item_at(
 
     Returns (version, generated_at, section_type, item) or None.
     """
-    from laya.pipeline.omni import _load_full_snapshot
+    from laya.pipeline.omni import load_full_snapshot
 
     if at_version < 1:
         return None
-    content, ver, _card_ids, meta = await _load_full_snapshot(db, space_id, at_version)
+    content, ver, _card_ids, meta = await load_full_snapshot(db, space_id, at_version)
     if content is None:
         return None
     located = _locate_item(content.get("sections", []), item_key, section_type)
@@ -831,13 +831,13 @@ async def get_omni_item(
     can only open 12 must say so.
     """
     from laya.api.cards_common import CARD_SELECT_COLUMNS, _row_to_card
-    from laya.pipeline.omni import _fetch_card_meta, _load_full_snapshot
+    from laya.pipeline.omni import fetch_card_meta, load_full_snapshot
 
     if not item:
         raise HTTPException(status_code=400, detail="item (item_key) is required")
 
     db = await get_db()
-    content, ver, _card_ids, meta = await _load_full_snapshot(db, space_id, v)
+    content, ver, _card_ids, meta = await load_full_snapshot(db, space_id, v)
     if content is None:
         raise HTTPException(status_code=404, detail="No Omni snapshot for this space")
 
@@ -858,7 +858,7 @@ async def get_omni_item(
     found_section, found_item = located
 
     source_cards = [c for c in (found_item.get("source_cards") or []) if c]
-    card_meta = await _fetch_card_meta(db, source_cards)
+    card_meta = await fetch_card_meta(db, source_cards)
     _decorate_live([{"type": found_section, "items": [found_item]}], card_meta)
 
     cards: list[dict] = []
@@ -943,13 +943,13 @@ async def get_omni_item_lineage(
     item: str = "",
 ):
     """Lineage alone, for callers that already hold the item and its cards."""
-    from laya.pipeline.omni import _load_full_snapshot
+    from laya.pipeline.omni import load_full_snapshot
 
     if not item:
         raise HTTPException(status_code=400, detail="item (item_key) is required")
 
     db = await get_db()
-    content, ver, _card_ids, _meta = await _load_full_snapshot(db, space_id, v)
+    content, ver, _card_ids, _meta = await load_full_snapshot(db, space_id, v)
     if content is None:
         raise HTTPException(status_code=404, detail="No Omni snapshot for this space")
 
