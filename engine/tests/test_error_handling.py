@@ -41,7 +41,7 @@ class TestLLMRetries:
             return mock_resp
 
         with patch("litellm.acompletion", side_effect=_flaky_completion):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=30.0):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=3):
                         result = await llm_call(
@@ -59,7 +59,7 @@ class TestLLMRetries:
             raise Exception("Persistent API error")
 
         with patch("litellm.acompletion", side_effect=_always_fail):
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=30.0):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=2):
                         with pytest.raises(Exception, match="Persistent API error"):
@@ -81,7 +81,7 @@ class TestLLMRetries:
         mock_resp.usage.completion_tokens = 10
 
         with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_resp) as mock_call:
-            with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+            with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=30.0):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=3):
                         result = await llm_call(
