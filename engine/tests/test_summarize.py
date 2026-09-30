@@ -131,7 +131,7 @@ async def test_batch_fold_uses_ceil_calls_not_one_per_card(db):
 
     with patch.object(summarize, "llm_call", new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
-         patch("laya.pipeline.summarize.manager.broadcast", new_callable=AsyncMock):
+         patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", [_card(i) for i in range(15)], [])
 
     assert len(calls) == 2, f"expected ceil(15/10)=2 batched calls, got {len(calls)}"
@@ -159,7 +159,7 @@ async def test_intra_flush_and_persisted_duplicates_are_skipped(db):
     flush = [_card(0), _card(1), _card(1), _card(2)]
     with patch.object(summarize, "llm_call", new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
-         patch("laya.pipeline.summarize.manager.broadcast", new_callable=AsyncMock):
+         patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", flush, [])
 
     assert len(calls) == 1
@@ -181,7 +181,7 @@ async def test_batch_failure_falls_back_to_per_card(db):
 
     with patch.object(summarize, "llm_call", new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
-         patch("laya.pipeline.summarize.manager.broadcast", new_callable=AsyncMock):
+         patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", [_card(i) for i in range(3)], [])
 
     assert seen_batch, "batch path should have been attempted"
