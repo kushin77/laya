@@ -32,7 +32,7 @@ def mock_llm_worker():
     mock_response.usage.completion_tokens = 200
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
@@ -56,7 +56,7 @@ def mock_llm_comms_worker():
     mock_response.usage.completion_tokens = 100
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
@@ -81,7 +81,7 @@ def mock_llm_ops_worker():
     mock_response.usage.completion_tokens = 150
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
@@ -115,7 +115,7 @@ def mock_llm_sales_worker():
     mock_response.usage.completion_tokens = 100
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
@@ -140,7 +140,7 @@ def mock_llm_hr_worker():
     mock_response.usage.completion_tokens = 100
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
@@ -166,7 +166,7 @@ def mock_llm_finance_worker():
     mock_response.usage.completion_tokens = 150
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield
