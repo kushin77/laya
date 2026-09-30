@@ -25,6 +25,11 @@ from laya.db.timeutil import db_now
 from laya.egress.models import Connection, ConnectionResult
 from laya.egress.registry import get_capabilities
 from laya.integrations.platforms import PLATFORMS
+from laya.security.keychain import (
+    delete_egress_secret,
+    get_egress_secret,
+    set_egress_secret,
+)
 
 log = structlog.get_logger()
 
@@ -546,16 +551,13 @@ _CRED_CACHE_TTL = 60.0
 
 def _store_in_keychain(connection_id: str, platform: str, credentials: dict) -> bool:
     """Store credentials in OS keychain."""
-    try:
-        import keyring
-
-        key = f"{platform}:{connection_id}"
-        keyring.set_password(EGRESS_KEYCHAIN_SERVICE, key, json.dumps(credentials))
-        _CRED_CACHE[key] = (time.monotonic(), dict(credentials))
-        return True
-    except Exception as e:
-        log.error("keychain_store_failed", connection_id=connection_id, error=str(e))
+    key = f"{platform}:{connection_id}"
+    ok = set_egress_secret(EGRESS_KEYCHAIN_SERVICE, key, json.dumps(credentials))
+    if not ok:
+        log.error("keychain_store_failed", connection_id=connection_id)
         return False
+    _CRED_CACHE[key] = (time.monotonic(), dict(credentials))
+    return True
 
 
 def _get_from_keychain(connection_id: str, platform: str) -> dict | None:
@@ -565,27 +567,22 @@ def _get_from_keychain(connection_id: str, platform: str) -> dict | None:
     if entry is not None and (time.monotonic() - entry[0]) < _CRED_CACHE_TTL:
         # Copy so a caller mutating the result can't corrupt the cache.
         return dict(entry[1]) if entry[1] is not None else None
+    raw = get_egress_secret(EGRESS_KEYCHAIN_SERVICE, key)
     try:
-        import keyring
-
-        raw = keyring.get_password(EGRESS_KEYCHAIN_SERVICE, key)
         val = json.loads(raw) if raw else None
-        _CRED_CACHE[key] = (time.monotonic(), val)
-        return dict(val) if val is not None else None
     except Exception:
         return None
+    _CRED_CACHE[key] = (time.monotonic(), val)
+    return dict(val) if val is not None else None
 
 
 def _remove_from_keychain(connection_id: str, platform: str) -> None:
     """Remove credentials from OS keychain."""
-    try:
-        import keyring
-
-        key = f"{platform}:{connection_id}"
-        keyring.delete_password(EGRESS_KEYCHAIN_SERVICE, key)
-        _CRED_CACHE.pop(key, None)
-    except Exception as e:
-        log.warning("keychain_delete_failed", connection_id=connection_id, error=str(e))
+    key = f"{platform}:{connection_id}"
+    if not delete_egress_secret(EGRESS_KEYCHAIN_SERVICE, key):
+        log.warning("keychain_delete_failed", connection_id=connection_id)
+        return
+    _CRED_CACHE.pop(key, None)
 
 
 # ---------------------------------------------------------------------------
