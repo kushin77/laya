@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import type { ChatMessage } from '$lib/api/types';
 import { mergeStreamingIntoLoaded, applyLoadedMessages } from './chatStream';
-import { chatMessages, streamingMessageId } from './chat';
+import { chatSession } from './chat';
 
 function msg(id: string, role: 'user' | 'assistant', content: string, convId = 'conv_1'): ChatMessage {
 	return {
@@ -20,8 +20,7 @@ function msg(id: string, role: 'user' | 'assistant', content: string, convId = '
 }
 
 beforeEach(() => {
-	chatMessages.set([]);
-	streamingMessageId.set(null);
+	chatSession.update((s) => ({ ...s, messages: [], streamingMessageId: null }));
 });
 
 describe('mergeStreamingIntoLoaded', () => {
@@ -56,16 +55,19 @@ describe('mergeStreamingIntoLoaded', () => {
 
 describe('applyLoadedMessages', () => {
 	it('preserves the live streaming placeholder across a DB reload', () => {
-		streamingMessageId.set('m2');
-		chatMessages.set([msg('m1', 'user', 'hi'), msg('m2', 'assistant', 'live content ahead of DB')]);
+		chatSession.update((s) => ({
+			...s,
+			streamingMessageId: 'm2',
+			messages: [msg('m1', 'user', 'hi'), msg('m2', 'assistant', 'live content ahead of DB')]
+		}));
 		applyLoadedMessages('conv_1', [msg('m1', 'user', 'hi'), msg('m2', 'assistant', 'stale flush')]);
-		const result = get(chatMessages);
+		const result = get(chatSession).messages;
 		expect(result[1].content).toBe('live content ahead of DB');
 	});
 
 	it('plain-sets when no stream is active', () => {
-		chatMessages.set([msg('mX', 'assistant', 'old view')]);
+		chatSession.update((s) => ({ ...s, messages: [msg('mX', 'assistant', 'old view')] }));
 		applyLoadedMessages('conv_1', [msg('m1', 'user', 'hi')]);
-		expect(get(chatMessages).map((m) => m.message_id)).toEqual(['m1']);
+		expect(get(chatSession).messages.map((m) => m.message_id)).toEqual(['m1']);
 	});
 });
