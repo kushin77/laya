@@ -141,3 +141,60 @@ async def get_entity(entity_id: str) -> dict[str, Any]:
         entity["related_events"] = []
 
     return {"entity": entity}
+
+
+def get_definitions() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_entities",
+                "description": (
+                    "Search cross-platform entities (people, projects, tickets, repos, threads). "
+                    "Returns paginated results — check 'has_more' and use 'offset' to retrieve additional pages."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for entity name.",
+                        },
+                        "entity_type": {
+                            "type": "string",
+                            "enum": ["person", "project", "ticket", "repo", "thread", "issue"],
+                            "description": "Filter by entity type.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 10, max 200).",
+                            "default": 10,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0). Use with 'total' and 'has_more' from results to page through all matches.",
+                            "default": 0,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_entity",
+                "description": "Get full details of a specific entity, including all platform references and related cards.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID.",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+            },
+        },
+    ]
