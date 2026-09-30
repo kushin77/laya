@@ -15,32 +15,32 @@ from laya.llm.client import LLMResponse, _get_model_for_role, llm_call
 
 
 def test_model_prefix_anthropic():
-    with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
         assert _get_model_for_role("router") == "anthropic/claude-haiku-4-5-20251001"
 
 
 def test_model_prefix_openai():
-    with patch("laya.llm.client.load_settings", return_value={"models": {"router": "gpt-4o-mini"}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "gpt-4o-mini"}}):
         assert _get_model_for_role("router") == "openai/gpt-4o-mini"
 
 
 def test_model_prefix_google():
-    with patch("laya.llm.client.load_settings", return_value={"models": {"router": "gemini-2.0-flash"}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "gemini-2.0-flash"}}):
         assert _get_model_for_role("router") == "gemini/gemini-2.0-flash"
 
 
 def test_model_prefix_ollama_passthrough():
-    with patch("laya.llm.client.load_settings", return_value={"models": {"router": "ollama/llama3"}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "ollama/llama3"}}):
         assert _get_model_for_role("router") == "ollama/llama3"
 
 
 def test_model_prefix_already_prefixed():
-    with patch("laya.llm.client.load_settings", return_value={"models": {"router": "anthropic/claude-3-opus"}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "anthropic/claude-3-opus"}}):
         assert _get_model_for_role("router") == "anthropic/claude-3-opus"
 
 
 def test_model_default_when_missing():
-    with patch("laya.llm.client.load_settings", return_value={"models": {}}):
+    with patch("laya.llm.model_resolution.load_settings", return_value={"models": {}}):
         result = _get_model_for_role("router")
         assert result == "anthropic/claude-haiku-4-5"
 
@@ -67,7 +67,7 @@ async def test_llm_call_success(db):
     mock_response = _mock_acompletion_response()
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     result = await llm_call(
@@ -97,7 +97,7 @@ async def test_llm_call_success(db):
 async def test_llm_call_logs_audit_on_failure(db):
     """Failed LLM call still writes audit log with success=False."""
     with patch("litellm.acompletion", new_callable=AsyncMock, side_effect=Exception("API down")):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     with pytest.raises(Exception, match="API down"):
@@ -121,7 +121,7 @@ async def test_llm_call_without_schema(db):
     mock_response = _mock_acompletion_response(content="Hello, world!", prompt_tokens=50, completion_tokens=10)
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"chat": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"chat": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     result = await llm_call(
@@ -140,7 +140,7 @@ async def test_llm_call_malformed_json(db):
     mock_response = _mock_acompletion_response(content="not valid json {")
 
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     result = await llm_call(
@@ -164,7 +164,7 @@ async def _capture_acompletion_kwargs(*, response_schema, custom_meta):
     mock_ac = AsyncMock(return_value=mock_response)
 
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "lmstudio-local/qwen3.5-9b"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "lmstudio-local/qwen3.5-9b"}}):
             with patch("laya.llm.client._get_custom_provider_meta", return_value=custom_meta):
                 with patch(
                     "laya.llm.client._resolve_custom_provider",
@@ -238,7 +238,7 @@ async def test_max_tokens_clamped_to_cloud_output_cap(db):
     """A known cloud model clamps the lenient default down to its max output cap."""
     mock_ac = AsyncMock(return_value=_mock_acompletion_response())
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
             with patch("litellm.get_model_info", return_value={"max_output_tokens": 8192}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
@@ -260,14 +260,14 @@ async def test_max_tokens_clamped_to_local_context_window(db):
     disc = DiscoveredModel(key="lmstudio-local/qwen3.5-9b", display_name="q", max_context_length=32768)
     mock_ac = AsyncMock(return_value=_mock_acompletion_response())
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "lmstudio-local/qwen3.5-9b"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "lmstudio-local/qwen3.5-9b"}}):
             with patch(
                 "laya.llm.client._resolve_custom_provider",
                 return_value=("openai/qwen3.5-9b", {"api_base": "http://x/v1", "api_key": "x"}),
             ):
                 with patch("laya.llm.providers.get_custom_provider", return_value={"id": "lmstudio-local"}):
                     with patch("laya.llm.providers.discover_models_cached", new_callable=AsyncMock, return_value=[disc]):
-                        with patch("laya.llm.client._estimate_prompt_tokens", return_value=2000):
+                        with patch("laya.llm.model_resolution._estimate_prompt_tokens", return_value=2000):
                             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                                     await llm_call(
@@ -285,7 +285,7 @@ async def test_no_clamp_for_unknown_model(db):
     """An unknown model (LiteLLM has no info) is left unclamped — behavior unchanged."""
     mock_ac = AsyncMock(return_value=_mock_acompletion_response())
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "openai/some-unknown-model"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "openai/some-unknown-model"}}):
             with patch("litellm.get_model_info", side_effect=Exception("unknown model")):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
@@ -307,7 +307,7 @@ async def test_truncation_retry_skipped_at_ceiling(db):
     truncated.choices[0].finish_reason = "length"
     mock_ac = AsyncMock(return_value=truncated)
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
             with patch("litellm.get_model_info", return_value={"max_output_tokens": 8192}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
@@ -330,7 +330,7 @@ async def test_truncation_retry_bounded_by_ceiling(db):
     truncated.choices[0].finish_reason = "length"
     mock_ac = AsyncMock(side_effect=[truncated, _mock_acompletion_response()])
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-opus-4-1-20250805"}}):
             with patch("litellm.get_model_info", return_value={"max_output_tokens": 6000}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
@@ -508,7 +508,7 @@ async def test_no_stop_for_cloud_provider(db):
     """Cloud providers manage their own stop tokens — we don't inject the local stop list."""
     mock_ac = AsyncMock(return_value=_mock_acompletion_response())
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     await llm_call(
@@ -533,7 +533,7 @@ async def _run_local_truncated(content):
         "supports_reasoning": False,
     }
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "lmstudio-local/gemma-3-4b"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "lmstudio-local/gemma-3-4b"}}):
             with patch(
                 "laya.llm.client._resolve_custom_provider",
                 return_value=("openai/gemma-3-4b", {"api_base": "http://x/v1", "api_key": "x"}),
@@ -589,7 +589,7 @@ async def _run_local_stopped(content):
         "supports_reasoning": False,
     }
     with patch("litellm.acompletion", mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "lmstudio-local/gemma-4-e4b"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "lmstudio-local/gemma-4-e4b"}}):
             with patch(
                 "laya.llm.client._resolve_custom_provider",
                 return_value=("openai/gemma-4-e4b", {"api_base": "http://x/v1", "api_key": "x"}),
@@ -648,7 +648,7 @@ async def test_streaming_applies_max_tokens_clamp(db):
         return _fake_stream()
 
     with patch("litellm.acompletion", _mock_ac):
-        with patch("laya.llm.client.load_settings", return_value={"models": {"chat": "claude-opus-4-1-20250805"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"chat": "claude-opus-4-1-20250805"}}):
             with patch("litellm.get_model_info", return_value={"max_output_tokens": 8192}):
                 with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                     async for _ in llm_call_streaming(
@@ -658,3 +658,60 @@ async def test_streaming_applies_max_tokens_clamp(db):
 
     assert captured["stream"] is True
     assert captured["max_tokens"] == 8192  # clamped from DEFAULT_MAX_TOKENS (65536)
+
+
+# --- Pipeline hook injection (#14) ---
+
+
+@pytest.mark.asyncio
+async def test_configure_pipeline_hooks_invoked_and_timeout_applied():
+    """llm/client.py takes no direct pipeline import; the pipeline layer injects
+    its budget/timeout/retry behavior via configure_pipeline_hooks (#14). This
+    exercises the actual hook seam rather than only the no-hooks-registered
+    fallback the rest of this file's tests run under."""
+    import laya.llm.client as client_module
+
+    on_complete_calls = []
+    mock_ac = AsyncMock(return_value=_mock_acompletion_response())
+
+    client_module.configure_pipeline_hooks(
+        on_complete=lambda result: on_complete_calls.append(result),
+        model_timeout=lambda: 111.0,
+        llm_retries=lambda: 1,
+    )
+    try:
+        with patch("litellm.acompletion", mock_ac):
+            with patch(
+                "laya.llm.model_resolution.load_settings",
+                return_value={"models": {"router": "claude-haiku-4-5-20251001"}},
+            ):
+                result = await llm_call(
+                    role="router",
+                    messages=[{"role": "user", "content": "hi"}],
+                    step="route",
+                )
+    finally:
+        client_module.configure_pipeline_hooks()  # reset — global state, must not leak
+
+    assert mock_ac.call_args.kwargs["timeout"] == 111.0
+    assert len(on_complete_calls) == 1
+    assert on_complete_calls[0] is result
+
+
+@pytest.mark.asyncio
+async def test_llm_call_works_with_no_hooks_registered():
+    """When the pipeline layer never calls configure_pipeline_hooks (e.g. a
+    standalone script), llm_call must still work via its own defaults rather
+    than raising for a missing pipeline import."""
+    import laya.llm.client as client_module
+
+    client_module.configure_pipeline_hooks()  # ensure a clean slate
+    mock_ac = AsyncMock(return_value=_mock_acompletion_response())
+    with patch("litellm.acompletion", mock_ac):
+        with patch(
+            "laya.llm.model_resolution.load_settings",
+            return_value={"models": {"router": "claude-haiku-4-5-20251001"}},
+        ):
+            await llm_call(role="router", messages=[{"role": "user", "content": "hi"}], step="route")
+
+    assert mock_ac.call_args.kwargs["timeout"] == client_module._DEFAULT_MODEL_TIMEOUT

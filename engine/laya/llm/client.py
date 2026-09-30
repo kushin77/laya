@@ -3,13 +3,9 @@
 
 """LiteLLM wrapper with model selection, retries, and audit logging."""
 
-import asyncio
 import json
-import re
-import sqlite3
 import time
-import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,12 +13,20 @@ import structlog
 import tenacity
 from pydantic import BaseModel
 
-from laya.config import load_settings
-from laya.db.sqlite import get_db
+from laya.llm.audit import log_to_audit
+from laya.llm.json_repair import _extract_json, _looks_like_padding, _strip_think_blocks
+from laya.llm.model_resolution import (
+    _add_provider_prefix,
+    _estimate_prompt_tokens,  # noqa: F401 — re-exported, patched by tests
+    _get_custom_provider_meta,
+    _get_model_for_role,
+    _get_space_api_key,
+    _get_space_model,
+    _resolve_custom_provider,
+    _resolve_max_output_ceiling,
+)
 
 log = structlog.get_logger()
-
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", flags=re.DOTALL)
 
 # Lenient default output cap for all LLM calls. max_tokens is a CEILING, not a
 # target: a well-behaved model stops at finish_reason=stop when its output is
@@ -47,154 +51,62 @@ _LOCAL_STOP_SEQUENCES = ["<end_of_turn>", "<eos>", "<|im_end|>", "<|eot_id|>"]
 _LOCAL_REPEAT_PENALTY = 1.15
 
 
-def _strip_think_blocks(text: str) -> str:
-    """Remove <think>...</think> blocks that thinking models embed in content."""
-    if "<think>" not in text:
-        return text
-    result = _THINK_BLOCK_RE.sub("", text).strip()
-    if result.startswith("<think>"):
-        result = result[len("<think>"):].strip()
-    return result
+# ── Pipeline decoupling (#14) ──────────────────────────────────────────────
+# llm/client.py is the core LLM call path and must stay pure infra: it does not
+# import laya.pipeline. Budget tracking, agent rate-limit accounting, and the
+# pipeline-configured timeout/retry settings are pipeline-layer concerns, so the
+# pipeline layer injects them here once at startup (see laya.pipeline.llm_hooks)
+# instead of client.py reaching up to import them.
+_on_complete_hook: Callable[["LLMResponse"], None] | None = None
+_on_agent_rate_limit_hook: Callable[[str, dict | None], None] | None = None
+_model_timeout_fn: Callable[[], float] | None = None
+_llm_retries_fn: Callable[[], int] | None = None
+
+_DEFAULT_MODEL_TIMEOUT = 480.0
+_DEFAULT_LLM_RETRIES = 3
 
 
-def _extract_json(content: str, allow_completion: bool = False) -> Any | None:
-    """Best-effort parse of a JSON object/array from model output.
+def configure_pipeline_hooks(
+    *,
+    on_complete: Callable[["LLMResponse"], None] | None = None,
+    on_agent_rate_limit: Callable[[str, dict | None], None] | None = None,
+    model_timeout: Callable[[], float] | None = None,
+    llm_retries: Callable[[], int] | None = None,
+) -> None:
+    """Register pipeline-layer hooks for llm_call, called once at startup.
 
-    Beyond a strict json.loads() this handles two things verbose/non-stopping models add:
-    1. ```json … ``` markdown fences some models wrap around the JSON.
-    2. A complete JSON document followed by trailing junk — non-stopping local models
-       (e.g. Gemma on LMStudio, whose <end_of_turn> isn't recognized as a stop) keep
-       generating after the object closes, usually padding `\n`. A simple .strip() handles
-       *pure* trailing whitespace; the balanced-brace scan below also recovers a complete
-       object/array followed by non-whitespace junk.
-
-    When `allow_completion` is set and the balanced-brace scan fails, a last-resort pass
-    (`_complete_json`) rebuilds an object the model left *unterminated* because it padded
-    whitespace before emitting the closing brackets — the Gemma-on-LMStudio failure where the
-    turn stops (finish_reason=stop, NOT length) mid-padding, so the object never closed and no
-    truncation retry ever fires. That completion is opt-in because it changes the "unterminated
-    → None" contract other call sites (e.g. the truncation detector) rely on to trigger a retry.
-
-    Returns the parsed value, or None when no object/array could be recovered (the document was
-    genuinely truncated before a complete value — a real retry candidate).
+    Callbacks must be synchronous and fire-and-forget internally (e.g. schedule
+    their own background task) — llm_call does not await them.
     """
-    if not content:
-        return None
-    s = content.strip()
-    # Strip ```json … ``` fences that some models wrap around the JSON.
-    if s.startswith("```"):
-        nl = s.find("\n")
-        if nl != -1:
-            s = s[nl + 1:]
-        if s.endswith("```"):
-            s = s[:-3]
-        s = s.strip()
+    global _on_complete_hook, _on_agent_rate_limit_hook, _model_timeout_fn, _llm_retries_fn
+    _on_complete_hook = on_complete
+    _on_agent_rate_limit_hook = on_agent_rate_limit
+    _model_timeout_fn = model_timeout
+    _llm_retries_fn = llm_retries
+
+
+def _run_on_complete(result: "LLMResponse") -> None:
+    if _on_complete_hook is None:
+        return
     try:
-        return json.loads(s)
-    except json.JSONDecodeError:
+        _on_complete_hook(result)
+    except Exception:
+        pass  # Never let a pipeline hook break the LLM call path.
+
+
+def _run_on_agent_rate_limit(agent_model: str, info: dict | None) -> None:
+    """`agent_model` is the resolved `agent/<id>/<model_string>` — parsed here
+    (inside the try) so a malformed model string can't escape as an unhandled
+    exception after an already-successful, already-audited LLM call."""
+    if _on_agent_rate_limit_hook is None:
+        return
+    try:
+        from laya.llm import agent_backend
+
+        agent_id = agent_backend.parse_agent_model_id(agent_model)[0]
+        _on_agent_rate_limit_hook(agent_id, info)
+    except Exception:
         pass
-    # Salvage: walk from the first opener to its matching closer (respecting strings and
-    # escapes) and parse just that span, ignoring whatever the model padded afterwards. A
-    # genuinely-unterminated document never balances → None.
-    start = next((i for i, c in enumerate(s) if c in "{["), -1)
-    if start == -1:
-        return None
-    opener = s[start]
-    closer = "}" if opener == "{" else "]"
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(s)):
-        c = s[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c == opener:
-            depth += 1
-        elif c == closer:
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(s[start:i + 1])
-                except json.JSONDecodeError:
-                    return None
-    # The first opener never balanced. If the caller allows it, try to close a document the
-    # model left unterminated because it padded whitespace instead of emitting the closers.
-    if allow_completion:
-        return _complete_json(s, start)
-    return None
-
-
-def _complete_json(s: str, start: int) -> Any | None:
-    """Recover JSON left unterminated by a non-stopping model that padded trailing whitespace
-    instead of emitting the closing brackets.
-
-    The Gemma-on-LMStudio failure: the model emits the whole object, then pads `\n  ` (newline +
-    indent) until it finally hits a recognized stop — so it halts with finish_reason=stop having
-    never written the final `}`. The object is complete in every way except the closers, so we
-    strip the whitespace padding (and a dangling comma), then append the brackets needed to
-    balance. `json.loads` is the final guard: a genuinely-broken document (unbalanced, or cut
-    mid-value) still returns None.
-
-    Bails when the padding-stripped body ends *inside a string* — there the trailing whitespace
-    is real value content, not structural padding, so completing it would corrupt/truncate the
-    value. That's the signature of a genuine mid-content truncation, which the caller handles
-    via the doubling retry instead.
-    """
-    body = s[start:].rstrip()
-    if body.endswith(","):  # model stopped right after a separator, before the next value
-        body = body[:-1].rstrip()
-    if not body:
-        return None
-    stack: list[str] = []
-    in_str = False
-    esc = False
-    for c in body:
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c == "{":
-            stack.append("}")
-        elif c == "[":
-            stack.append("]")
-        elif c == "}" or c == "]":
-            if stack:
-                stack.pop()
-    # Ended mid-string, or already balanced (a balanced-but-invalid doc, e.g. trailing junk the
-    # strict/scan passes already rejected) — nothing safe to append.
-    if in_str or not stack:
-        return None
-    try:
-        return json.loads(body + "".join(reversed(stack)))
-    except json.JSONDecodeError:
-        return None
-
-
-def _looks_like_padding(content: str) -> bool:
-    """True when the tail of `content` is dominated by repeated whitespace / a single repeated
-    character — the signature of a non-stopping model padding to max_tokens (e.g. Gemma on
-    LMStudio spewing `\n`) rather than a genuinely truncated document. Used to skip the
-    doubling-retry, which on a padder would just generate *more* padding and fail again."""
-    tail = content[-200:]
-    if not tail:
-        return False
-    stripped = tail.strip()
-    # Almost-all-whitespace tail, or the same character over and over.
-    return len(stripped) <= 2 or len(set(stripped)) <= 1
 
 
 @dataclass
@@ -220,220 +132,6 @@ class LLMResponse(BaseModel):
     tool_calls: list | None = None  # List of ToolCall objects
     raw_message_dict: dict | None = None  # Raw message for tool loop continuation
 
-
-async def _get_space_model(role: str, space_id: str) -> str | None:
-    """Look up a space-specific model override for the given role.
-
-    Returns None if the space has no override for this role.
-    """
-    from laya.db.sqlite import get_db
-
-    db = await get_db()
-    try:
-        rows = await db.execute_fetchall(
-            f"SELECT {role}_model FROM spaces WHERE space_id = ?",
-            (space_id,),
-        )
-    except sqlite3.OperationalError:
-        # Role doesn't have a per-space column (e.g. group_summary)
-        return None
-    if rows and rows[0][f"{role}_model"]:
-        return rows[0][f"{role}_model"]
-    return None
-
-
-async def _get_space_api_key(provider: str, space_id: str) -> str | None:
-    """Look up a space-specific API key for the given provider.
-
-    Returns None if the space has no key override for this provider.
-    """
-    from laya.db.sqlite import get_db
-    from laya.security.keychain import get_space_api_key
-
-    db = await get_db()
-    rows = await db.execute_fetchall(
-        "SELECT key_ref FROM space_api_keys WHERE space_id = ? AND provider = ?",
-        (space_id, provider),
-    )
-    if rows:
-        return get_space_api_key(rows[0]["key_ref"])
-    return None
-
-
-def _get_model_for_role(role: str) -> str:
-    """Look up the configured model for a given role (router, stager, chat).
-
-    Adds provider prefix if not already present.
-    Roles that share a model with another role (e.g. group_summary → router)
-    fall back to that role's model before the global default.
-    """
-    _ROLE_FALLBACKS = {
-        "group_summary": "router",
-    }
-
-    settings = load_settings()
-    models = settings.get("models", {})
-    model_name = models.get(role)
-
-    if not model_name and role in _ROLE_FALLBACKS:
-        model_name = models.get(_ROLE_FALLBACKS[role])
-
-    if not model_name:
-        model_name = "claude-haiku-4-5"
-
-    if "/" in model_name:
-        return model_name
-
-    return _add_provider_prefix(model_name)
-
-
-def _add_provider_prefix(model_name: str) -> str:
-    """Add provider prefix to a model name if not already present."""
-    if "/" in model_name:
-        return model_name
-    if model_name.startswith("claude"):
-        return f"anthropic/{model_name}"
-    elif model_name.startswith(("gpt", "o1", "o3", "o4")):
-        return f"openai/{model_name}"
-    elif model_name.startswith("gemini"):
-        return f"gemini/{model_name}"
-    return model_name
-
-
-def _resolve_custom_provider(model: str) -> tuple[str, dict[str, Any]] | None:
-    """Check if a model string references a custom provider.
-
-    Custom provider models use format: {provider_id}/{model_name}
-    e.g., "lmstudio-local/qwen2.5-7b-instruct"
-
-    Returns (litellm_model_string, extra_kwargs) or None if not a custom provider.
-    """
-    if "/" not in model:
-        return None
-
-    prefix = model.split("/")[0]
-
-    # Skip known cloud provider prefixes
-    if prefix in ("anthropic", "openai", "gemini", "openrouter", "ollama"):
-        return None
-
-    from laya.llm.providers import get_custom_provider, _get_provider_api_key
-
-    provider = get_custom_provider(prefix)
-    if not provider:
-        return None
-
-    model_name = model.split("/", 1)[1]
-    ptype = provider.get("provider_type", "openai_compatible")
-    base_url = provider["base_url"].rstrip("/")
-
-    extra: dict[str, Any] = {
-        "timeout": float(provider.get("default_timeout", 120)),
-    }
-
-    if ptype == "ollama":
-        litellm_model = f"ollama/{model_name}"
-        extra["api_base"] = base_url
-    else:
-        # Both lmstudio and openai_compatible use OpenAI-compat endpoint
-        litellm_model = f"openai/{model_name}"
-        extra["api_base"] = f"{base_url}/v1"
-
-    # API key from keychain (optional for local providers)
-    api_key = _get_provider_api_key(provider)
-    if api_key:
-        extra["api_key"] = api_key
-    else:
-        extra["api_key"] = "not-needed"  # LiteLLM requires a non-empty value
-
-    return litellm_model, extra
-
-
-def _get_custom_provider_meta(model: str) -> dict | None:
-    """Get capability metadata for a custom provider model."""
-    if "/" not in model:
-        return None
-    prefix = model.split("/")[0]
-    if prefix in ("anthropic", "openai", "gemini", "openrouter", "ollama"):
-        return None
-    from laya.llm.providers import get_custom_provider
-
-    provider = get_custom_provider(prefix)
-    if not provider:
-        return None
-    ptype = provider.get("provider_type", "openai_compatible")
-    caps = provider.get("capabilities_override", {})
-    return {
-        "provider_type": ptype,
-        "supports_structured_output": caps.get("supports_structured_output", ptype == "lmstudio"),
-        "supports_tool_calling": caps.get("supports_tool_calling", ptype == "lmstudio"),
-        # Whether this provider may serve reasoning/"thinking" models (Qwen3, DeepSeek-R1,
-        # etc.). When true we disable thinking for structured-output calls — see llm_call.
-        "supports_reasoning": caps.get("supports_reasoning", ptype == "lmstudio"),
-    }
-
-
-# ── max_tokens context-window safety ─────────────────────────────────────
-# The lenient DEFAULT_MAX_TOKENS (65536) is deliberately high so structured output
-# never truncates. But strict servers 400 when it exceeds what they can serve: vLLM
-# rejects `prompt + max_tokens > max_model_len`; OpenAI/Anthropic reject `max_tokens`
-# above the model's max output (e.g. 65536*2=131072 from the truncation-retry exceeds
-# even Opus's 128K cap). Local servers (LMStudio/Ollama) clamp silently and don't need
-# this. We clamp ourselves so the same value is safe everywhere.
-_OUTPUT_MARGIN = 512   # headroom left below the context window for the prompt estimate
-_MIN_OUTPUT = 512      # never clamp output below this, even on a near-full context
-
-
-def _estimate_prompt_tokens(messages: list[dict], model: str) -> int:
-    """Best-effort prompt token count for context-window math. Prefers LiteLLM's
-    tokenizer; falls back to the chars/4 heuristic also used in llm_call_streaming."""
-    try:
-        import litellm
-
-        return int(litellm.token_counter(model=model, messages=messages))
-    except Exception:
-        return sum(len(str(m.get("content", ""))) for m in messages) // 4
-
-
-async def _resolve_max_output_ceiling(
-    litellm_model: str,
-    original_model: str,
-    is_custom: bool,
-    messages: list[dict],
-) -> int | None:
-    """Max output tokens this model/server will accept, or None when it can't be
-    determined (then we don't clamp and rely on the server's own behavior)."""
-    # Cloud models LiteLLM knows about: cap at the model's max OUTPUT tokens.
-    if not is_custom:
-        try:
-            import litellm
-
-            info = litellm.get_model_info(litellm_model) or {}
-            out = info.get("max_output_tokens") or info.get("max_tokens")
-            return out if isinstance(out, int) and out > 0 else None
-        except Exception:
-            return None
-
-    # Custom/local providers: cap at (discovered context window − prompt estimate).
-    # Populated for LMStudio (native API) and vLLM (max_model_len); None elsewhere.
-    try:
-        from laya.llm.providers import discover_models_cached, get_custom_provider
-
-        provider = get_custom_provider(original_model.split("/")[0])
-        if not provider:
-            return None
-        models = await discover_models_cached(provider)
-        window = next(
-            (m.max_context_length for m in models
-             if m.key == original_model and m.max_context_length),
-            None,
-        )
-        if not window:
-            return None
-        prompt_est = _estimate_prompt_tokens(messages, litellm_model)
-        return max(window - prompt_est - _OUTPUT_MARGIN, _MIN_OUTPUT)
-    except Exception:
-        return None
 
 
 # ── Current date/time injection ──────────────────────────────────────────
@@ -518,46 +216,6 @@ def _apply_prompt_caching(model: str, messages: list[dict]) -> list[dict]:
             out.append(msg)
     return out
 
-
-async def log_to_audit(
-    event_id: str | None,
-    card_id: str | None,
-    step: str,
-    model: str,
-    input_tokens: int,
-    output_tokens: int,
-    latency_ms: int,
-    success: bool,
-    error: str | None = None,
-    metadata: dict | None = None,
-) -> None:
-    """Write an entry to the audit_log table. Never raises."""
-    try:
-        db = await get_db()
-        await db.execute(
-            """INSERT INTO audit_log
-               (log_id, event_id, card_id, step, model_used, input_tokens,
-                output_tokens, latency_ms, success, error, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                f"audit_{uuid.uuid4().hex[:12]}",
-                event_id,
-                card_id,
-                step,
-                model,
-                input_tokens,
-                output_tokens,
-                latency_ms,
-                success,
-                error,
-                json.dumps(metadata) if metadata else None,
-            ),
-        )
-        await db.commit()
-    except Exception as e:
-        log.warning("audit_log_failed", error=str(e))
-
-
 async def _prepare_call_kwargs(
     *,
     model: str,
@@ -620,14 +278,12 @@ async def _prepare_call_kwargs(
         )
         max_tokens = max_output_ceiling
 
-    from laya.pipeline.queue import get_model_timeout
-
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": effective_temperature,
         "max_tokens": max_tokens,
-        "timeout": get_model_timeout(),
+        "timeout": _model_timeout_fn() if _model_timeout_fn else _DEFAULT_MODEL_TIMEOUT,
     }
     if stream:
         kwargs["stream"] = True
@@ -795,25 +451,10 @@ async def llm_call(
                 error=_audit_error,
                 metadata=_meta,
             )
-            try:
-                from laya.pipeline.budget import check_budget
-                from laya.tasks import create_task as create_tracked_task
-
-                create_tracked_task(check_budget())
-            except Exception:
-                pass
+            _run_on_complete(result)
             # Agent usage-budget: persist the native rate-limit signal (Claude), then
             # evaluate window limits (may pause ingestion until the usage window resets).
-            try:
-                from laya.pipeline.agent_budget import evaluate_agent_budget, record_rate_limit
-                from laya.tasks import create_task as create_tracked_task
-
-                agent_id = agent_backend.parse_agent_model_id(model)[0]
-                if ar.rate_limit_info:
-                    await record_rate_limit(agent_id, ar.rate_limit_info)
-                create_tracked_task(evaluate_agent_budget())
-            except Exception:
-                pass
+            _run_on_agent_rate_limit(model, ar.rate_limit_info)
             log.info(
                 "llm_call_complete",
                 role=role,
@@ -860,11 +501,10 @@ async def llm_call(
     max_output_ceiling = _prep["max_output_ceiling"]
     max_tokens = kwargs["max_tokens"]  # possibly clamped by _prepare_call_kwargs
 
-    from laya.pipeline.queue import get_llm_retries
     # If the caller didn't override num_retries from the default, use the
-    # configured pipeline.llm_retries value (review §5.7).
-    if num_retries == 3:
-        num_retries = get_llm_retries()
+    # pipeline-configured llm_retries value (review §5.7), when one is registered.
+    if num_retries == 3 and _llm_retries_fn:
+        num_retries = _llm_retries_fn()
 
     # Retry only transient failures. Deterministic 4xx (bad request, auth,
     # not-found, unprocessable, content-policy) fail identically on every attempt,
@@ -1106,13 +746,9 @@ async def llm_call(
             error=_audit_error,
         )
 
-        # Check budget limit (fire-and-forget to avoid slowing the pipeline)
-        try:
-            from laya.pipeline.budget import check_budget
-            from laya.tasks import create_task as create_tracked_task
-            create_tracked_task(check_budget())
-        except Exception:
-            pass  # Never let budget check break the pipeline
+        # Notify the pipeline layer (budget check etc.) — fire-and-forget, never
+        # lets a hook failure break the LLM call path.
+        _run_on_complete(result)
 
         return result
 
