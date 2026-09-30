@@ -94,10 +94,16 @@ def _run_on_complete(result: "LLMResponse") -> None:
         pass  # Never let a pipeline hook break the LLM call path.
 
 
-def _run_on_agent_rate_limit(agent_id: str, info: dict | None) -> None:
+def _run_on_agent_rate_limit(agent_model: str, info: dict | None) -> None:
+    """`agent_model` is the resolved `agent/<id>/<model_string>` — parsed here
+    (inside the try) so a malformed model string can't escape as an unhandled
+    exception after an already-successful, already-audited LLM call."""
     if _on_agent_rate_limit_hook is None:
         return
     try:
+        from laya.llm import agent_backend
+
+        agent_id = agent_backend.parse_agent_model_id(agent_model)[0]
         _on_agent_rate_limit_hook(agent_id, info)
     except Exception:
         pass
@@ -448,8 +454,7 @@ async def llm_call(
             _run_on_complete(result)
             # Agent usage-budget: persist the native rate-limit signal (Claude), then
             # evaluate window limits (may pause ingestion until the usage window resets).
-            agent_id = agent_backend.parse_agent_model_id(model)[0]
-            _run_on_agent_rate_limit(agent_id, ar.rate_limit_info)
+            _run_on_agent_rate_limit(model, ar.rate_limit_info)
             log.info(
                 "llm_call_complete",
                 role=role,
