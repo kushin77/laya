@@ -518,7 +518,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_st1", "evt_st1", status="pending")
         action = SetStatusAction(status="dismissed", reason="Auto-dismissed by rule")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock) as mock_bc:
             result = await _execute_action(action, "card_st1", None, None, {})
 
         assert result["success"] is True
@@ -532,7 +532,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_st2", "evt_st2", status="pending")
         action = SetStatusAction(status="archived")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_st2", None, None, {})
 
         assert result["success"] is True
@@ -543,7 +543,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_st3", "evt_st3", status="pending")
         action = SetStatusAction(status="done")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_st3", None, None, {})
 
         assert result["success"] is True
@@ -554,7 +554,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_pr1", "evt_pr1", priority="MEDIUM")
         action = SetPriorityAction(priority="CRITICAL")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock) as mock_bc:
             result = await _execute_action(action, "card_pr1", None, None, {})
 
         assert result["success"] is True
@@ -567,7 +567,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_bk1", "evt_bk1")
         action = BookmarkAction()
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_bk1", None, None, {})
 
         assert result["success"] is True
@@ -583,7 +583,7 @@ class TestActionExecutors:
         await db.commit()
 
         action = BookmarkAction()
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await _execute_action(action, "card_bk2", None, None, {})
 
         rows = await db.execute_fetchall("SELECT bookmarked_at FROM action_cards WHERE card_id = ?", ("card_bk2",))
@@ -597,7 +597,7 @@ class TestActionExecutors:
             body_template="Check it out",
         )
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock) as mock_bc:
             result = await _execute_action(action, "card_notif", None, None, context)
 
         assert result["success"] is True
@@ -706,7 +706,7 @@ class TestRunProcessingRules:
         await insert_test_card(db, "card_run1", "evt_proc_001", space_id=None)
         await self._insert_rule(db, rule_id=200, space_id=None)
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -734,7 +734,7 @@ class TestRunProcessingRules:
             space_id=None,
         )
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -750,7 +750,7 @@ class TestRunProcessingRules:
         await insert_test_card(db, "card_run3", "evt_proc_001", space_id=None)
         await self._insert_rule(db, rule_id=202, enabled=0, space_id=None)
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -778,7 +778,7 @@ class TestRunProcessingRules:
             space_id=None,
         )
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock) as mock_bc:
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -809,7 +809,7 @@ class TestRunProcessingRules:
         )
         await db.commit()
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -828,7 +828,7 @@ class TestRunProcessingRules:
         await insert_test_card(db, "card_run7", "evt_proc_001", space_id="workspace_a")
         await self._insert_rule(db, rule_id=206, space_id="workspace_a")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -844,7 +844,7 @@ class TestRunProcessingRules:
         await insert_test_card(db, "card_run8", "evt_proc_001", space_id="workspace_b")
         await self._insert_rule(db, rule_id=207, space_id="workspace_a")
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -860,7 +860,7 @@ class TestRunProcessingRules:
         await insert_test_card(db, "card_run9", "evt_proc_001", space_id=None)
         await self._insert_rule(db, rule_id=208, error_count=3, space_id=None)
 
-        with patch("laya.pipeline.processing_rules.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
             await run_processing_rules(
                 event=sample_processing_event,
                 router_output=sample_router_output,
@@ -932,7 +932,7 @@ async def agent_env(db):
         p(patch("laya.config.load_repos", new=MagicMock(return_value={"repos": []})))
         p(patch("laya.api.cards_api._stream_entity_agent", new=MagicMock()))
         p(patch("laya.tasks.create_task", new=MagicMock()))
-        p(patch("laya.pipeline.processing_rules.manager.broadcast", new=AsyncMock()))
+        p(patch("laya.pipeline.processing_rules.publish", new=AsyncMock()))
         yield mocks
 
 
