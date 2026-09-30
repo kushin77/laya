@@ -6,7 +6,7 @@
 	import { parseBackendDate, timeAgo } from '$lib/utils/datetime';
 	import { PRIORITY_LABELS, PRIORITY_COLORS } from '$lib/utils/cardVisuals';
 	import { goto } from '$app/navigation';
-	import { chatOpen, chatCardContext, chatCardIds, chatListOpen } from '$lib/stores/chat';
+	import { chatOpen, chatSession, chatListOpen } from '$lib/stores/chat';
 	import PlatformBadge from '$lib/components/PlatformBadge.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import { glassTheme } from '$lib/stores/glassTheme';
@@ -197,8 +197,7 @@
 			lines.push(...cardLines);
 		}
 		const groupCardIds = group.cards.map((c) => c.card_id);
-		chatCardContext.set(lines.join('\n'));
-		chatCardIds.set(groupCardIds);
+		chatSession.update((s) => ({ ...s, cardContext: lines.join('\n'), cardIds: groupCardIds }));
 		chatListOpen.set(false);
 		chatOpen.set(true);
 	}
