@@ -20,15 +20,45 @@ on:
     paths:
       - 'engine/laya/**'
       - 'engine/tests/**'
+      - 'engine/requirements*'
       - 'ui/src/**'
+      - 'ui/package.json'
       - '.github/workflows/ci.yml'
 
 permissions:
   contents: read
 
 jobs:
+  # Per-module gate: a PR that only touches ui/** shouldn't pay for the
+  # engine jobs and vice versa (fork issue #40 — pages.yml already does
+  # this per-workflow with landing/**; ci.yml covers two modules in one
+  # workflow, so the split happens per job instead).
+  changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+    outputs:
+      engine: ${{ steps.filter.outputs.engine }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            engine:
+              - 'engine/laya/**'
+              - 'engine/tests/**'
+              - 'engine/requirements*'
+              - '.github/workflows/ci.yml'
+            ui:
+              - 'ui/src/**'
+              - 'ui/package.json'
+              - '.github/workflows/ci.yml'
+
   engine-test:
     name: Engine — lint + pytest
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +76,8 @@ jobs:
 
   engine-lint:
     name: Engine — lint (ruff, non-blocking bootstrap)
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,11 +85,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ruff
-        run: pip install ruff
-      # ruff isn't pinned in requirements-dev yet and the codebase has never
-      # been linted, so this starts informational (see fork issue #42) —
-      # tighten to blocking once a baseline is established and ruff is added
-      # to requirements-dev.txt.
+        run: pip install "ruff>=0.16"
+      # ruff is pinned in requirements-dev now (matching this floor), but the
+      # codebase has never been linted, so this stays informational (see
+      # fork issue #42) until a baseline is established.
       - name: Lint (ruff)
         working-directory: engine
         run: ruff check laya
@@ -65,6 +96,8 @@ jobs:
 
   ui-test:
     name: UI — lint + typecheck + vitest
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
