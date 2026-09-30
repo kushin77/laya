@@ -22,7 +22,7 @@ import structlog
 
 from laya.api.cards_api import CARD_SELECT_COLUMNS, _row_to_card
 from laya.pipeline.queue import _get_semaphore
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.db.chromadb_store import memory_search
 from laya.retrieval import extract_keywords, fts_or_like, reciprocal_rank_fusion
 from laya.db.sqlite import get_db
@@ -286,7 +286,7 @@ async def run_trace(request: TraceRequest, trace_id: str | None = None) -> Trace
 
     async def _progress(stage: str, step: int, total: int) -> None:
         _check_cancelled(trace_id)  # Check before each stage
-        await manager.broadcast({
+        await publish({
             "type": "trace_progress",
             "trace_id": trace_id,
             "query": request.query,
@@ -299,7 +299,7 @@ async def run_trace(request: TraceRequest, trace_id: str | None = None) -> Trace
         return await _run_trace_inner(request, trace_id, _progress, t0)
     except TraceCancelled:
         log.info("trace_cancelled", trace_id=trace_id)
-        await manager.broadcast({
+        await publish({
             "type": "trace_cancelled",
             "trace_id": trace_id,
         })
@@ -514,7 +514,7 @@ async def _run_trace_inner(
     # (a rerun can outlast any timeout) can still recover the result by fetching
     # this trace_id. Broadcast AFTER _save_trace so any client that reacts by
     # calling GET /traces/{id} is guaranteed to find the persisted row.
-    await manager.broadcast({
+    await publish({
         "type": "trace_complete",
         "trace_id": trace_id,
         "query": request.query,
@@ -1356,7 +1356,7 @@ async def _stream_cluster_narrative_inner(
     try:
         messages = build_narrative_messages([cluster], user_identity=get_self_user())
 
-        await manager.broadcast({
+        await publish({
             "type": "trace_narrative_start",
             "trace_id": trace_id,
             "cluster_id": cluster_id,
@@ -1372,7 +1372,7 @@ async def _stream_cluster_narrative_inner(
         ):
             if event.type == "chunk" and event.content:
                 full_narrative += event.content
-                await manager.broadcast({
+                await publish({
                     "type": "trace_narrative_chunk",
                     "trace_id": trace_id,
                     "cluster_id": cluster_id,
@@ -1393,7 +1393,7 @@ async def _stream_cluster_narrative_inner(
             trace_id=trace_id, cluster_id=cluster_id, error=str(e),
         )
     finally:
-        await manager.broadcast({
+        await publish({
             "type": "trace_narrative_done",
             "trace_id": trace_id,
             "cluster_id": cluster_id,
@@ -1431,7 +1431,7 @@ async def stream_trace_summary(
         try:
             messages = build_summary_messages(query, clusters, user_identity=get_self_user())
 
-            await manager.broadcast({
+            await publish({
                 "type": "trace_narrative_start",
                 "trace_id": trace_id,
                 "cluster_id": summary_id,
@@ -1447,7 +1447,7 @@ async def stream_trace_summary(
             ):
                 if event.type == "chunk" and event.content:
                     full_text += event.content
-                    await manager.broadcast({
+                    await publish({
                         "type": "trace_narrative_chunk",
                         "trace_id": trace_id,
                         "cluster_id": summary_id,
@@ -1468,7 +1468,7 @@ async def stream_trace_summary(
         except Exception as e:
             log.error("trace_summary_failed", trace_id=trace_id, error=str(e))
         finally:
-            await manager.broadcast({
+            await publish({
                 "type": "trace_narrative_done",
                 "trace_id": trace_id,
                 "cluster_id": summary_id,
