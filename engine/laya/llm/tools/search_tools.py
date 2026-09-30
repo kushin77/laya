@@ -55,3 +55,48 @@ async def semantic_search(
         ],
         "count": len(results),
     }
+
+
+def get_read_definitions() -> list[dict]:
+    """OpenAI function-calling schemas for the cross-content search tools."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "semantic_search",
+                "description": (
+                    "Perform a semantic (meaning-based) search across all stored content. "
+                    "Use this when keyword search isn't enough and you need conceptual matching."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language search query.",
+                        },
+                        "n_results": {
+                            "type": "integer",
+                            "description": "Number of results (default 10).",
+                            "default": 10,
+                        },
+                        "date_from": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the start of a time range "
+                                "filter (inclusive). Omit if no temporal intent."
+                            ),
+                        },
+                        "date_to": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the end of a time range "
+                                "filter (inclusive). Omit if no temporal intent."
+                            ),
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+    ]
