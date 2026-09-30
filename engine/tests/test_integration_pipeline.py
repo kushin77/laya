@@ -136,7 +136,7 @@ class TestPipelineIntegration:
 
         # Mock emit dependencies
         with patch("laya.pipeline.emit.embed_document", new_callable=AsyncMock):
-            with patch("laya.pipeline.emit.manager", MagicMock(broadcast=AsyncMock())):
+            with patch("laya.pipeline.emit.publish", new_callable=AsyncMock):
                 with patch("laya.pipeline.emit.resolve_semantic_entities", new_callable=AsyncMock):
                     with patch("laya.pipeline.emit.trigger_summary_update"):
                         card_id = await run_emit(event, router_output, stager_output)
@@ -210,7 +210,7 @@ class TestPipelineIntegration:
                 stager_output = await run_stager(event, router_output)
 
         with patch("laya.pipeline.emit.embed_document", new_callable=AsyncMock):
-            with patch("laya.pipeline.emit.manager", MagicMock(broadcast=AsyncMock())):
+            with patch("laya.pipeline.emit.publish", new_callable=AsyncMock):
                 with patch("laya.pipeline.emit.resolve_semantic_entities", new_callable=AsyncMock):
                     with patch("laya.pipeline.emit.trigger_summary_update"):
                         card_id = await run_emit(event, router_output, stager_output)
@@ -255,7 +255,7 @@ class TestPipelineIntegration:
         )]
 
         with patch("laya.pipeline.emit.embed_document", new_callable=AsyncMock):
-            with patch("laya.pipeline.emit.manager", MagicMock(broadcast=AsyncMock())):
+            with patch("laya.pipeline.emit.publish", new_callable=AsyncMock):
                 with patch("laya.pipeline.emit.resolve_semantic_entities", new_callable=AsyncMock):
                     with patch("laya.pipeline.emit.trigger_summary_update"):
                         card_id = await run_emit(event, router_output, stager_output, worker_results)
