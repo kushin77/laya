@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 import structlog
 
-from laya.api.websocket import manager
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
 from laya.egress import execute as egress_execute
