@@ -1,0 +1,82 @@
+name: CI
+
+# Path-scoped test/lint gate for the engine and UI modules. Neither module had
+# any workflow that ran on ordinary source edits before this — engine-deps.yml
+# only covers dependency-pin changes, release.yml only builds. See fork
+# issues #37 (no test/typecheck CI), #42 (no lint gate), #43 (no path-scoped
+# triggers).
+
+on:
+  pull_request:
+    paths:
+      - 'engine/laya/**'
+      - 'engine/tests/**'
+      - 'engine/requirements*'
+      - 'ui/src/**'
+      - 'ui/package.json'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'engine/laya/**'
+      - 'engine/tests/**'
+      - 'ui/src/**'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  engine-test:
+    name: Engine — lint + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install uv
+      - name: Install engine deps
+        working-directory: engine
+        run: uv pip install --system -r requirements.txt -r requirements-dev.txt
+      - name: Test (pytest)
+        working-directory: engine
+        run: pytest -q
+
+  engine-lint:
+    name: Engine — lint (ruff, non-blocking bootstrap)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff
+      # ruff isn't pinned in requirements-dev yet and the codebase has never
+      # been linted, so this starts informational (see fork issue #42) —
+      # tighten to blocking once a baseline is established and ruff is added
+      # to requirements-dev.txt.
+      - name: Lint (ruff)
+        working-directory: engine
+        run: ruff check laya
+        continue-on-error: true
+
+  ui-test:
+    name: UI — lint + typecheck + vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        working-directory: ui
+        run: npm ci
+      - name: Typecheck (svelte-check)
+        working-directory: ui
+        run: npm run check
+      - name: Unit tests (vitest)
+        working-directory: ui
+        run: npm test
