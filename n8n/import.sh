@@ -19,8 +19,16 @@ for workflow_file in "$WORKFLOW_DIR"/*.json; do
 
     if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
         echo "    OK"
+    elif [ "$http_code" = "409" ] || echo "$body" | grep -qi "already exists"; then
+        # n8n has no live instance to verify against here; based on its public API docs a
+        # duplicate workflow name returns 409, and some versions return 400 with an
+        # "already exists" message in the body instead. Treat either as a no-op, not a failure,
+        # so re-running this script is safe. If your n8n version reports duplicates differently,
+        # adjust this check.
+        echo "    Already imported, skipping"
     else
-        echo "    Warning: HTTP $http_code — you may need to set an API key or import manually via the n8n UI"
+        echo "    ERROR: HTTP $http_code importing $name — $body" >&2
+        echo "    You may need to set an API key or import manually via the n8n UI" >&2
     fi
 done
 
