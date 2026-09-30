@@ -12,6 +12,64 @@ from laya.db.sqlite import get_db
 from laya.llm.tools.constants import ENTITY_SEARCH_DEFAULT, ENTITY_SEARCH_MAX
 
 
+def get_read_definitions() -> list[dict]:
+    """OpenAI function-calling schemas for the entity read tools."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_entities",
+                "description": (
+                    "Search cross-platform entities (people, projects, tickets, repos, threads). "
+                    "Returns paginated results — check 'has_more' and use 'offset' to retrieve additional pages."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for entity name.",
+                        },
+                        "entity_type": {
+                            "type": "string",
+                            "enum": ["person", "project", "ticket", "repo", "thread", "issue"],
+                            "description": "Filter by entity type.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 10, max 200).",
+                            "default": 10,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0). Use with 'total' and 'has_more' from results to page through all matches.",
+                            "default": 0,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_entity",
+                "description": "Get full details of a specific entity, including all platform references and related cards.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity ID.",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+            },
+        },
+    ]
+
+
 async def search_entities(
     query: str | None = None,
     entity_type: str | None = None,
