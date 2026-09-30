@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 import re
 
 from laya.egress.models import EgressCapability
@@ -144,6 +146,28 @@ class LinearPlatform(Platform):
                 errors.append("Missing 'assignee_id'")
 
         return errors
+
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate Linear API key by querying the viewer."""
+        key = credentials.get("apiKey", "")
+        if not key:
+            return False, "Missing apiKey"
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.linear.app/graphql",
+                headers={"Authorization": key, "Content-Type": "application/json"},
+                json={"query": "{ viewer { id name } }"},
+                timeout=10.0,
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data", {}).get("viewer"):
+                return True, None
+            return False, "Invalid API key"
+        return False, f"Linear returned HTTP {resp.status_code}"
 
 
 PLATFORM = LinearPlatform()
