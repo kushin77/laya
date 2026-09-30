@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 import re
 
 from laya.config import load_repos
@@ -216,6 +218,28 @@ class BitbucketPlatform(Platform):
                 errors.append("Missing 'dest_branch'")
 
         return errors
+
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate Bitbucket app password by calling GET /2.0/user."""
+        email = credentials.get("email", "")
+        token = credentials.get("accessToken", "")
+        if not all([email, token]):
+            return False, "Missing email or app password"
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.bitbucket.org/2.0/user",
+                auth=(email, token),
+                timeout=10.0,
+            )
+
+        if resp.status_code == 200:
+            return True, None
+        elif resp.status_code == 401:
+            return False, "Invalid username or app password"
+        else:
+            return False, f"Bitbucket returned HTTP {resp.status_code}"
 
 
 PLATFORM = BitbucketPlatform()

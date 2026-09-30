@@ -22,7 +22,7 @@ from laya.egress.models import ConnectionResult
 class TestValidateCredentials:
     @pytest.mark.asyncio
     async def test_jira_valid(self):
-        with patch("laya.egress.connections.httpx.AsyncClient") as mock_client_cls:
+        with patch("laya.egress.platforms.jira.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock()
@@ -41,7 +41,7 @@ class TestValidateCredentials:
 
     @pytest.mark.asyncio
     async def test_jira_invalid(self):
-        with patch("laya.egress.connections.httpx.AsyncClient") as mock_client_cls:
+        with patch("laya.egress.platforms.jira.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock()
@@ -66,7 +66,7 @@ class TestValidateCredentials:
 
     @pytest.mark.asyncio
     async def test_github_valid(self):
-        with patch("laya.egress.connections.httpx.AsyncClient") as mock_client_cls:
+        with patch("laya.egress.platforms.github.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock()
@@ -86,7 +86,7 @@ class TestValidateCredentials:
 
     @pytest.mark.asyncio
     async def test_bitbucket_valid(self):
-        with patch("laya.egress.connections.httpx.AsyncClient") as mock_client_cls:
+        with patch("laya.egress.platforms.bitbucket.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock()
@@ -108,7 +108,7 @@ class TestValidateCredentials:
 
     @pytest.mark.asyncio
     async def test_unknown_platform_passes(self):
-        valid, error = await _validate_credentials("notion", {"apiKey": "x"})
+        valid, error = await _validate_credentials("totally_unregistered_platform", {"apiKey": "x"})
         assert valid is True
 
 
@@ -118,9 +118,9 @@ class TestCreateConnection:
         """Test successful connection creation with mocked validation and keychain."""
         with patch("laya.egress.connections._validate_credentials", new_callable=AsyncMock, return_value=(True, None)):
             with patch("laya.egress.connections._store_in_keychain", return_value=True):
-                with patch("laya.egress.connections._provision_to_n8n", new_callable=AsyncMock, return_value="n8n_cred_1"):
+                with patch("laya.egress.provisioning.provision_to_n8n", new_callable=AsyncMock, return_value="n8n_cred_1"):
                     # Mock workflow cloning to prevent creating real workflows in n8n
-                    with patch("laya.egress.connections._clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
+                    with patch("laya.egress.provisioning.clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
                         result = await create_connection("jira", {"email": "x", "apiToken": "y", "domain": "z"})
 
                         assert result.status == "connected"
@@ -157,8 +157,8 @@ class TestListConnections:
     async def test_list_after_create(self, db):
         with patch("laya.egress.connections._validate_credentials", new_callable=AsyncMock, return_value=(True, None)):
             with patch("laya.egress.connections._store_in_keychain", return_value=True):
-                with patch("laya.egress.connections._provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
-                    with patch("laya.egress.connections._clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
+                with patch("laya.egress.provisioning.provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
+                    with patch("laya.egress.provisioning.clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
                         await create_connection("github", {"accessToken": "ghp_abc"}, name="GitHub Main")
 
         conns = await list_all_connections()
@@ -174,8 +174,8 @@ class TestRemoveConnection:
         # Create first
         with patch("laya.egress.connections._validate_credentials", new_callable=AsyncMock, return_value=(True, None)):
             with patch("laya.egress.connections._store_in_keychain", return_value=True):
-                with patch("laya.egress.connections._provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
-                    with patch("laya.egress.connections._clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
+                with patch("laya.egress.provisioning.provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
+                    with patch("laya.egress.provisioning.clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
                         result = await create_connection("slack", {"accessToken": "xoxb"})
 
         # Verify exists
@@ -185,7 +185,7 @@ class TestRemoveConnection:
         # Remove
         with patch("laya.egress.connections._remove_from_keychain"):
             with patch("laya.integrations.n8n_client.delete_credential", new_callable=AsyncMock):
-                with patch("laya.egress.connections._remove_connection_workflows", new_callable=AsyncMock):
+                with patch("laya.egress.provisioning.remove_connection_workflows", new_callable=AsyncMock):
                     await remove_connection(result.connection_id)
 
         # Verify gone
@@ -199,8 +199,8 @@ class TestCheckConnection:
         # Create
         with patch("laya.egress.connections._validate_credentials", new_callable=AsyncMock, return_value=(True, None)):
             with patch("laya.egress.connections._store_in_keychain", return_value=True):
-                with patch("laya.egress.connections._provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
-                    with patch("laya.egress.connections._clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
+                with patch("laya.egress.provisioning.provision_to_n8n", new_callable=AsyncMock, return_value="cred1"):
+                    with patch("laya.egress.provisioning.clone_workflows_for_connection", new_callable=AsyncMock, return_value=(2, [])):
                         result = await create_connection("github", {"accessToken": "ghp_abc"})
 
         # Test it

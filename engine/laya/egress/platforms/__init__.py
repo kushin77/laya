@@ -26,7 +26,9 @@ from laya.egress.platforms import (
     bitbucket,
     bitbucket_server,
     calendar,
+    discord,
     github,
+    gitlab,
     gmail,
     jira,
     linear,
@@ -38,6 +40,10 @@ from laya.egress.platforms import (
 
 # Canonical platform -> adapter. Order matches the historical _CAPABILITIES
 # insertion order so get_all_platforms() / compose ordering stay stable.
+# Every entry here must declare real capabilities (enforced by
+# test_platform_interface.test_adapter_contract) — gitlab/discord have no n8n
+# executor/ingestion integration (see registry.py's _PLATFORM_KEYWORDS note),
+# so they live in ``_VALIDATION_ONLY`` instead of here.
 _REGISTRY: dict[str, Platform] = {
     "gmail": gmail.PLATFORM,
     "outlook": outlook.PLATFORM,
@@ -51,6 +57,16 @@ _REGISTRY: dict[str, Platform] = {
     "linear": linear.PLATFORM,
     "calendar": calendar.GOOGLE_CALENDAR,
     "outlook_calendar": calendar.OUTLOOK_CALENDAR,
+}
+
+# Platforms with no n8n executor/ingestion integration (no capabilities to
+# declare) that still need Platform.validate_credentials — kept out of
+# _REGISTRY so they don't trip the "every registered adapter has capabilities"
+# contract. ``credential_validators()`` merges this with _REGISTRY for the
+# connection broker's validation dispatch.
+_VALIDATION_ONLY: dict[str, Platform] = {
+    "gitlab": gitlab.PLATFORM,
+    "discord": discord.PLATFORM,
 }
 
 # Enrichment dispatch: platform string -> adapter. smtp is intentionally absent
@@ -83,11 +99,20 @@ def registry_platforms() -> dict[str, Platform]:
     return _REGISTRY
 
 
+def credential_validators() -> dict[str, Platform]:
+    """Platform→adapter map for credential validation: _REGISTRY plus the
+    validation-only adapters (gitlab, discord) that have no capabilities."""
+    return {**_REGISTRY, **_VALIDATION_ONLY}
+
+
 __all__ = [
     "Platform",
     "bitbucket",
+    "bitbucket_server",
     "calendar",
+    "discord",
     "github",
+    "gitlab",
     "gmail",
     "jira",
     "linear",
@@ -97,4 +122,5 @@ __all__ = [
     "smtp",
     "for_platform",
     "registry_platforms",
+    "credential_validators",
 ]

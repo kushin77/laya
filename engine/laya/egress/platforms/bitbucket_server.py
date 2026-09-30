@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 
+import httpx
+
 from laya.egress.platforms.bitbucket import BitbucketPlatform
 
 
@@ -45,6 +47,44 @@ class BitbucketServerPlatform(BitbucketPlatform):
         if action_type == "merge_pr" and not had_strategy:
             p.pop("merge_strategy", None)
         return p
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Validate a Bitbucket Server / Data Center HTTP access token.
+
+        Probes the authenticated-only inbox count endpoint — present on every
+        supported Server/DC version and, unlike /application-properties, never
+        answers anonymously, so a bad token can't slip through as valid.
+        """
+        server = (credentials.get("server", "")).strip().rstrip("/")
+        token = credentials.get("accessToken", "")
+        if not all([server, token]):
+            return False, "Missing required fields: server, accessToken"
+
+        if not server.startswith(("http://", "https://")):
+            return False, "Server URL must start with http:// or https:// (e.g. https://bitbucket.your-company.com)"
+
+        # On-prem servers commonly present certificates from an internal CA that
+        # certifi doesn't trust; the connection form's opt-in toggle disables
+        # verification (still TLS-encrypted). The same flag reaches the n8n workflow
+        # nodes as allowUnauthorizedCerts via workflow-config/payload injection.
+        verify = credentials.get("allowInsecureSsl") not in (True, "true", "True", "1")
+
+        url = f"{server}/rest/api/1.0/inbox/pull-requests/count"
+        async with httpx.AsyncClient(verify=verify) as client:
+            resp = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+
+        if resp.status_code == 200:
+            return True, None
+        elif resp.status_code == 401:
+            return False, "Invalid or expired access token"
+        elif resp.status_code == 404:
+            return False, "Server URL does not look like a Bitbucket Server instance (REST API not found)"
+        else:
+            return False, f"Bitbucket Server returned HTTP {resp.status_code}"
 
 
 PLATFORM = BitbucketServerPlatform()
