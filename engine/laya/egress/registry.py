@@ -16,8 +16,8 @@ platform owner:
   platforms).
 - ``_COMPOSE_HIDDEN_FIELDS`` / ``_NON_COMPOSABLE_ACTIONS`` — global sets.
 - ``_LEGACY_PLATFORM_MAP`` — keyed by pre-Spaces *connection_id*.
-- ``_PLATFORM_KEYWORDS`` — workflow-name keywords (includes discord/gitlab, which
-  have no adapter).
+- ``_PLATFORM_KEYWORDS`` — workflow-name keywords (includes discord/gitlab, whose
+  adapters carry no capabilities — no n8n executor/ingestion integration).
 """
 
 from laya.egress import platforms as _platforms
@@ -121,8 +121,8 @@ _TERMINAL_EVENT_TYPES: dict[str, frozenset[str]] = {
 
 # ---------------------------------------------------------------------------
 # Platform keywords — used to detect platform from n8n workflow names.
-# Cross-cutting: includes discord/gitlab (no adapter) and omits smtp/
-# outlook_calendar, so it cannot be derived from the adapters.
+# Cross-cutting: includes discord/gitlab (whose adapters carry no capabilities)
+# and omits smtp/outlook_calendar, so it cannot be derived from the adapters.
 # ---------------------------------------------------------------------------
 
 _PLATFORM_KEYWORDS: dict[str, str] = {
