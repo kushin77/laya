@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, AsyncIterator
 
 import structlog
 
 from laya.agents.base import BaseCodingAgent
+from laya.agents.cli_protocol import is_approval_prompt
 from laya.agents.subprocess_helper import AgentProcess, strip_ansi
 from laya.models.workspace import (
     SessionStatus,
@@ -21,12 +21,6 @@ from laya.models.workspace import (
 )
 
 log = structlog.get_logger()
-
-APPROVAL_PATTERNS = [
-    re.compile(r"Do you want to (proceed|continue)\?", re.IGNORECASE),
-    re.compile(r"\[Y/n\]", re.IGNORECASE),
-    re.compile(r"\(y/N\)", re.IGNORECASE),
-]
 
 
 class CodexCliAgent(BaseCodingAgent):
@@ -152,7 +146,7 @@ class CodexCliAgent(BaseCodingAgent):
                 continue
 
             # Fallback: non-JSON stderr leak or approval prompt
-            if any(p.search(line) for p in APPROVAL_PATTERNS):
+            if is_approval_prompt(line):
                 self._status = SessionStatus.AWAITING_INPUT
                 yield self._make_event(
                     WorkspaceEventType.APPROVAL_REQUEST,
