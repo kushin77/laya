@@ -7,8 +7,40 @@ on:
 permissions:
   contents: write
 
+env:
+  # Keep in step with UV_VERSION in ui/src-tauri/src/runtime.rs so this
+  # verifies the lock the same way engine-deps.yml does.
+  UV_VERSION: '0.7.12'
+
 jobs:
+  # Verifies the locks are still installable, then bundles the engine source
+  # and lock files once. All four platform builds below consume the same
+  # bundle, so a release doesn't require rebundling per OS and a lock that
+  # went uninstallable since engine-deps.yml's last green run is caught here
+  # instead of shipping in the release.
+  bundle-engine:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Verify lock installability
+        run: scripts/smoke-install.sh --python 3.12 --no-tests
+
+      - name: Bundle engine resources
+        shell: bash
+        run: bash scripts/bundle-engine.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-bundle
+          path: ui/src-tauri/resources/engine
+
   build:
+    needs: bundle-engine
     strategy:
       fail-fast: false
       matrix:
@@ -50,9 +82,11 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      - name: Bundle engine resources
-        shell: bash
-        run: bash scripts/bundle-engine.sh
+      - name: Download engine bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-bundle
+          path: ui/src-tauri/resources/engine
 
       - name: Download VC++ Redistributable (Windows only)
         # ChromaDB's Rust bindings (chromadb_rust_bindings.*.pyd) link against
