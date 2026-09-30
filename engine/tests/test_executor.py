@@ -25,7 +25,7 @@ class TestExecutor:
         )
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock) as mock_bc:
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_exec", "act_1")
@@ -57,7 +57,7 @@ class TestExecutor:
         )
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_fail", "act_1")
@@ -72,7 +72,7 @@ class TestExecutor:
 
     async def test_execute_card_not_found(self, db):
         """Raises ValueError when card does not exist."""
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.pipeline.executor import execute_action
 
             with pytest.raises(ValueError, match="Card not found"):
@@ -82,7 +82,7 @@ class TestExecutor:
         """Raises ValueError when card status is not in the allowed set."""
         await insert_test_card(db, "card_done", "evt_done", status="done")
 
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.pipeline.executor import execute_action
 
             with pytest.raises(ValueError, match="must be"):
@@ -92,7 +92,7 @@ class TestExecutor:
         """Raises ValueError when action_id does not match any suggested action."""
         await insert_test_card(db, "card_noact", "evt_noact", status="pending")
 
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.pipeline.executor import execute_action
 
             with pytest.raises(ValueError, match="Action.*not found"):
@@ -111,7 +111,7 @@ class TestExecutor:
         mods = {"body": "Updated comment text"}
 
         with patch("laya.egress.route_and_execute", side_effect=capture_egress):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 await execute_action("card_mod", "act_1", modifications=mods)
@@ -126,7 +126,7 @@ class TestExecutor:
         mock_egress_result = EgressResult(success=True, result_data={})
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock) as mock_bc:
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock) as mock_bc:
                 from laya.pipeline.executor import execute_action
 
                 await execute_action("card_bc", "act_1")
@@ -146,7 +146,7 @@ class TestExecutor:
         mock_egress_result = EgressResult(success=True, result_data={})
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_rdy", "act_1")
@@ -161,7 +161,7 @@ class TestExecutor:
         mock_egress_result = EgressResult(success=True, result_data={})
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_fail2", "act_1")
@@ -175,7 +175,7 @@ class TestExecutor:
         mock_egress_result = EgressResult(success=True, result_data={})
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_agrun", "act_1")
@@ -194,7 +194,7 @@ class TestExecutor:
         )
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock) as mock_egress:
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_url", "act_1")
@@ -215,7 +215,7 @@ class TestExecutor:
             }],
         )
 
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.pipeline.executor import execute_action
 
             result = await execute_action("card_badurl", "act_1")
@@ -234,7 +234,7 @@ class TestExecutor:
             }],
         )
 
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.pipeline.executor import execute_action
 
             result = await execute_action("card_nourl", "act_1")
@@ -256,7 +256,7 @@ class TestExecutor:
         )
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock) as mock_egress:
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.pipeline.executor import execute_action
 
                 result = await execute_action("card_rawurl", "act_1")
