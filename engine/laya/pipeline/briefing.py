@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import load_settings
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_ts
@@ -258,7 +258,7 @@ async def generate_briefing(space_id: str | None = None) -> str:
     card_id = await run_emit(briefing_event, router_output, stager_output, space_id=space_id)
 
     # Broadcast briefing_ready
-    await manager.broadcast({
+    await publish({
         "type": "briefing_ready",
         "card_id": card_id,
         "payload": {"header": stager_output.header, "space_id": space_id or ""},
