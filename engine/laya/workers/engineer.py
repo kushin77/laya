@@ -15,7 +15,6 @@ from typing import Any
 import structlog
 
 from laya.config import load_repos, load_settings
-from laya.pipeline.related_context import query_related_context
 from laya.db.sqlite import get_db
 from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
 from laya.llm.prompts.engineer import build_engineer_messages, get_engineer_json_schema
@@ -132,11 +131,6 @@ async def resolve_repo_path(
     return primary, _other_paths(primary)
 
 
-async def _gather_context(event: LayaEvent, router_output: RouterOutput) -> list[dict]:
-    """Gather related context from ChromaDB memory (shared per-event — P6-7)."""
-    return await query_related_context(event, n_results=5)
-
-
 async def _build_agent_prompt(
     event: LayaEvent,
     router_output: RouterOutput,
@@ -164,6 +158,7 @@ async def _build_agent_prompt(
 async def run_engineer(
     event: LayaEvent,
     router_output: RouterOutput,
+    related_context: list[dict],
     card_id: str | None = None,
     space_id: str | None = None,
 ) -> WorkerResult:
@@ -171,11 +166,11 @@ async def run_engineer(
 
     Builds a detailed task prompt for a coding agent and stores it on
     the card. The agent is NOT spawned here — users invoke agents at
-    the entity/group level via the "Run Agent" flow.
+    the entity/group level via the "Run Agent" flow. ``related_context``
+    is retrieved by the caller (shared per-event memoized search, P6-7).
     """
     log.info("engineer_worker_start", event_id=event.event_id)
 
-    related_context = await _gather_context(event, router_output)
     agent_prompt = await _build_agent_prompt(event, router_output, related_context)
 
     # Store agent_prompt on card for later use by entity-level "Run Agent"
