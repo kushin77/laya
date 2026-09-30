@@ -211,6 +211,36 @@ export const engineApi = {
 	detectAgentPaths: () =>
 		request<{ agent_paths: Record<string, string> }>('/settings/detect-agents'),
 
+	checkSetupStatus: () => request<{ setup_complete: boolean }>('/settings/setup-status'),
+
+	exportDiagnostics: async (): Promise<Blob> => {
+		const resp = await fetch(`${ENGINE_URL}/diagnostics/export`);
+		if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
+		return resp.blob();
+	},
+
+	uploadAgentFile: (file: File) => {
+		const formData = new FormData();
+		formData.append('file', file);
+		return request<{ path: string; filename: string; content_type: string }>('/upload-agent-file', {
+			method: 'POST',
+			headers: undefined,
+			body: formData
+		});
+	},
+
+	uploadAgentFileByPath: (path: string) =>
+		request<{ path: string; filename: string; content_type: string }>('/upload-agent-file-path', {
+			method: 'POST',
+			body: JSON.stringify({ path })
+		}),
+
+	deleteAgentStagingFile: (path: string) =>
+		request<void>('/delete-agent-staging-file', {
+			method: 'POST',
+			body: JSON.stringify({ path })
+		}),
+
 	// Installed CLI agents usable as the inference backend (availability + capability tier)
 	getAgentBackends: () =>
 		request<AgentBackendsResponse>('/settings/agent-backends'),
