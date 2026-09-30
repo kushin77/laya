@@ -97,7 +97,7 @@ class TestResynthesisFailureRetry:
         await db.commit()
 
     async def test_failure_returns_none(self, db):
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
 
         await self._seed_cards(db, count=3)
 
@@ -112,7 +112,7 @@ class TestResynthesisFailureRetry:
 
     async def test_next_run_retries_failed_batch(self, db):
         """After a failure, the next attempt re-includes ALL cards since last success."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
 
         # Batch 1: 3 cards, LLM fails.
         await self._seed_cards(db, count=3, prefix="batch1")
@@ -169,7 +169,7 @@ class TestFetchCapMath:
 
     async def test_fetch_cap_respects_threshold(self, db):
         """With threshold=50, up to 150 cards should be pulled (not the hardcoded 100)."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
 
         # Seed 130 cards — only possible for the prompt to include them all if cap is ≥130.
         base = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -216,7 +216,7 @@ class TestFetchCapMath:
 
     async def test_fetch_cap_floor_with_threshold_disabled(self, db):
         """With threshold=0, cap should be the 100 floor."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
 
         base = datetime.now(timezone.utc) - timedelta(hours=1)
         for i in range(130):
@@ -278,7 +278,7 @@ class TestResolutionDrop:
         await db.commit()
 
     async def _clear_cache(self, space_id="default"):
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop(space_id, None)
 
     async def _load_latest_content(self, db, space_id="default"):
@@ -298,7 +298,7 @@ class TestResolutionDrop:
     async def test_resolved_attention_item_is_pruned(self, db):
         """A snapshot attention item whose source card is now done is dropped,
         even if the LLM stubbornly echoes it back (deterministic safety net)."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         await self._clear_cache()
 
         now = datetime.now(timezone.utc)
@@ -383,7 +383,7 @@ class TestResolutionDrop:
 
     async def test_entity_ids_backfilled_when_llm_omits(self, db):
         """Items the LLM returns without entity_ids get them backfilled from source cards."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         await self._clear_cache()
 
         now = datetime.now(timezone.utc)
@@ -457,7 +457,7 @@ class TestResynthesisChunking:
 
     async def test_small_batch_is_single_call(self, db):
         """A batch at or under the chunk size runs as exactly one LLM call."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
         await self._seed(db, omni_pipeline._RESYNTH_CHUNK_SIZE, "small")
 
@@ -482,7 +482,7 @@ class TestResynthesisChunking:
     async def test_large_burst_folds_in_ordered_chunks(self, db):
         """95 cards → 3 chunks (≤ 40 each), oldest folded first / newest last,
         and each fold's snapshot is the previous fold's output (feed-forward)."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
         await self._seed(db, 95, "burst")
 
@@ -531,7 +531,7 @@ class TestResynthesisChunking:
     async def test_state_inputs_apply_to_first_fold_only(self, db):
         """Snapshot-relative prune hints (item_states) accompany only the first
         chunk; later folds get an empty list."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
 
         now = datetime.now(timezone.utc)
@@ -592,7 +592,7 @@ class TestResynthesisChunking:
     async def test_later_chunk_failure_discards_run(self, db):
         """If a non-first chunk fails to parse, the whole run is discarded: no
         snapshot is stored and the watermark stays put so all cards retry."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
         await self._seed(db, 50, "partial")  # 2 chunks
 
@@ -695,7 +695,7 @@ class TestDegenerateSnapshotGuard:
         await db.commit()
 
     async def test_degenerate_result_is_not_stored(self, db):
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
         await self._seed(db, 3, "deg")
 
@@ -717,7 +717,7 @@ class TestDegenerateSnapshotGuard:
         assert rows[0]["n"] == 0  # the '...' skeleton never hit the DB
 
     async def test_poisoned_snapshot_is_dropped_and_regenerated(self, db):
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
 
         now = datetime.now(timezone.utc)
@@ -813,7 +813,7 @@ class TestEmptyResultGuard:
 
     async def test_empty_result_is_not_stored(self, db):
         """LLM folds real cards into zero items → nothing persisted, retry next run."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
         await self._seed(db, 3, "empty")
 
@@ -839,7 +839,7 @@ class TestEmptyResultGuard:
     async def test_empty_result_preserves_prior_snapshot(self, db):
         """A good snapshot survives an empty resynthesis instead of being
         overwritten with nothing (which would then feed itself forward)."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
 
         now = datetime.now(timezone.utc)
@@ -889,7 +889,7 @@ class TestEmptyResultGuard:
         """The guard runs BEFORE the resolved-attention prune: a result whose
         only item is legitimately dropped as resolved still stores (correctly
         empty) — it is NOT mistaken for a model that returned nothing."""
-        from laya.pipeline import omni as omni_pipeline
+        from laya.pipeline import omni_synthesis as omni_pipeline
         omni_pipeline._latest_cache.pop("default", None)
 
         now = datetime.now(timezone.utc)

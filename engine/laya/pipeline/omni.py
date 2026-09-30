@@ -9,6 +9,21 @@ Scheduled resynthesis uses the LLM to compress layers progressively.
 Delta storage: incremental snapshots store only the diff (added/fused items
 + new card_ids). Resynthesis snapshots store the full structure and serve as
 base checkpoints. Reconstruction chains deltas from the nearest base.
+
+This module is the thin public facade over three pieces split out for
+maintainability:
+
+- ``omni_snapshot``: snapshot load/reconstruction and delta application
+  (``load_full_snapshot``, ``apply_delta``, ``get_gate``, ``all_resolved``,
+  plus the shared ``_latest_cache`` / ``_resynthesis_gates`` state).
+- ``omni_synthesis``: the LLM-powered full resynthesis (``run_omni_resynthesis``).
+- ``omni_live``: live per-card state decoration (``fetch_card_meta``,
+  ``live_max_priority``).
+
+What stays here is the incremental queue processor — appending newly-emitted
+cards to the "recent" section without an LLM call — since it is the module's
+own read/write entry point into the snapshot store, not one of the three
+concerns above.
 """
 
 from __future__ import annotations
@@ -17,7 +32,6 @@ import asyncio
 import copy
 import json
 import uuid
-from datetime import datetime, timezone
 
 import structlog
 
@@ -25,71 +39,30 @@ from laya.events import publish
 from laya.config import load_settings
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
-from laya.models.card_lifecycle import TERMINAL_STATUSES as _TERMINAL_STATUSES
-from laya.llm.prompts.omni import (
-    build_omni_resynthesis_messages,
-    get_omni_json_schema,
+
+# Re-exported so existing callers (api/omni_api.py, laya/scheduler.py, tests)
+# that import these names from `laya.pipeline.omni` keep working unchanged.
+from laya.pipeline.omni_snapshot import (  # noqa: F401
+    _find_base_version,
+    _latest_cache,
+    _resynthesis_gates,
+    all_resolved,
+    apply_delta,
+    get_gate,
+    load_full_snapshot,
 )
-from laya.models.omni import OmniItem, OmniSection, OmniSnapshot, OmniStats
-from laya.pipeline.omni_change import (
-    compute_incremental_change_summary,
-    compute_resynthesis_change_summary,
-    decorate_item_keys,
+from laya.pipeline.omni_synthesis import (  # noqa: F401
+    _is_degenerate_sections,
+    run_omni_resynthesis,
 )
+from laya.pipeline.omni_live import fetch_card_meta, live_max_priority  # noqa: F401
+from laya.pipeline.omni_change import compute_incremental_change_summary, decorate_item_keys
 
 log = structlog.get_logger()
 
-# Max new cards folded into a single resynthesis LLM call. A full run can fetch
-# up to fetch_cap (~100-150) cards; combined with the current snapshot that
-# exceeds a local model's usable window, and the omni JSON schema is unforgiving
-# — a truncated response yields NO parsed output, losing the whole batch AND
-# handing the next run an even bigger backlog (the failure spiral flagged in the
-# Jul-2026 review, P6-13). We fold new cards in chunks of this size across
-# sequential smaller calls instead. ~30-50 is the sweet spot: strictly smaller
-# calls that local models can complete, at the cost of more of them.
-_RESYNTH_CHUNK_SIZE = 40
-
 # ---------------------------------------------------------------------------
-# In-memory cache for the latest reconstructed snapshot per space.
-# Populated on every write, avoids delta chain reconstruction on hot reads.
-# ---------------------------------------------------------------------------
-_latest_cache: dict[str, dict] = {}
-
-_VALID_OMNI_PRIORITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
-
-
-def _is_degenerate_sections(sections: list[dict]) -> bool:
-    """Detect a placeholder/skeleton resynthesis result rather than real content.
-
-    A local model under load (e.g. flooded because the concurrency cap wasn't
-    honored) can return every field as a literal '...' — observed: all items with
-    text='...' and priority='...', plus a hallucinated extra section. Because
-    resynthesis carries the snapshot FORWARD, storing such a result poisons the
-    base and EVERY later incremental inherits it, so the whole Omni page renders
-    as '...' until a good full snapshot replaces it.
-
-    We use this to (a) reject a degenerate result before storing it — treating it
-    like a failed synthesis so the last good snapshot stays — and (b) refuse to
-    feed an already-poisoned snapshot back to the model on the next run, so it
-    regenerates fresh instead of echoing the '...'.
-    """
-    items = [it for s in sections for it in s.get("items", [])]
-    if not items:
-        return False
-    bad = 0
-    for it in items:
-        text = (it.get("text") or "").strip()
-        prio = it.get("priority")
-        if text in ("", "...", "…") or (prio is not None and prio not in _VALID_OMNI_PRIORITIES):
-            bad += 1
-    # Half or more of the items being placeholders is unmistakable — a healthy
-    # synthesis has ~zero. A ratio (not "all") tolerates one odd item.
-    return bad >= len(items) * 0.5
-
-
-# ---------------------------------------------------------------------------
-# Delta helpers
+# Delta helpers (incremental append path only — resynthesis's own reconstruction
+# delta-apply lives in omni_snapshot.apply_delta)
 # ---------------------------------------------------------------------------
 
 
@@ -144,164 +117,6 @@ def _compute_delta(
     }
 
 
-def _apply_delta(content: dict, delta: dict) -> dict:
-    """Apply a delta to a full content snapshot, mutating in place."""
-    sections = content.get("sections", [])
-
-    # Find the "recent" section
-    recent_section = None
-    for section in sections:
-        if section.get("type") == "recent":
-            recent_section = section
-            break
-
-    if recent_section is None:
-        recent_section = {"type": "recent", "label": None, "items": []}
-        sections.append(recent_section)
-
-    # Apply fused_updates — match by entity_id, update fields
-    for entity_id, updates in delta.get("fused_updates", {}).items():
-        for item in recent_section.get("items", []):
-            if item.get("entity_id") == entity_id:
-                item.update(updates)
-                break
-
-    # Append added_items
-    recent_section.setdefault("items", []).extend(delta.get("added_items", []))
-
-    # Apply bookmark overrides
-    for source_card_id, bookmarked in delta.get("bookmark_overrides", {}).items():
-        for section in sections:
-            for item in section.get("items", []):
-                cards = item.get("source_cards", [])
-                if cards and cards[0] == source_card_id:
-                    item["bookmarked"] = bookmarked
-
-    content["sections"] = sections
-    return content
-
-
-async def _find_base_version(db, space_id: str, current_version: int) -> int | None:
-    """Find the version of the nearest base (non-delta) snapshot."""
-    rows = await db.execute_fetchall(
-        """SELECT version FROM omni_snapshots
-           WHERE space_id = ? AND is_delta = 0 AND version <= ?
-           ORDER BY version DESC LIMIT 1""",
-        (space_id, current_version),
-    )
-    return rows[0]["version"] if rows else None
-
-
-async def _load_full_snapshot(
-    db, space_id: str, version: int | None = None
-) -> tuple[dict | None, int, list[str], dict]:
-    """Load a fully reconstructed snapshot, handling delta chains.
-
-    For the latest version (version=None), checks the in-memory cache first.
-
-    Returns (content_dict, version_number, card_ids_list, metadata_dict).
-    metadata_dict contains snapshot_id, generated_at, snapshot_type.
-    """
-    # Cache hit for latest
-    if version is None and space_id in _latest_cache:
-        c = _latest_cache[space_id]
-        # Deep-copy so a caller that mutates the returned content (e.g.
-        # _append_to_recent appending recent items) can't corrupt the cached
-        # snapshot before the DB commit. A failed commit would otherwise leave
-        # the cache serving phantom state and re-processing would double-append
-        # (review §2 pipeline / §4). Installs into the cache stay post-commit.
-        return (
-            copy.deepcopy(c["content"]),
-            c["version"],
-            list(c["card_ids"]),
-            dict(c.get("meta", {})),
-        )
-
-    # Load the target row
-    if version is not None:
-        rows = await db.execute_fetchall(
-            """SELECT snapshot_id, version, generated_at, snapshot_type,
-                      content_json, card_ids, is_delta, base_version
-               FROM omni_snapshots
-               WHERE space_id = ? AND version = ?""",
-            (space_id, version),
-        )
-    else:
-        rows = await db.execute_fetchall(
-            """SELECT snapshot_id, version, generated_at, snapshot_type,
-                      content_json, card_ids, is_delta, base_version
-               FROM omni_snapshots
-               WHERE space_id = ?
-               ORDER BY version DESC LIMIT 1""",
-            (space_id,),
-        )
-
-    if not rows:
-        return None, 0, [], {}
-
-    row = rows[0]
-    meta = {
-        "snapshot_id": row["snapshot_id"],
-        "generated_at": row["generated_at"],
-        "snapshot_type": row["snapshot_type"],
-    }
-
-    if not row["is_delta"]:
-        # Full snapshot — return directly
-        content = json.loads(row["content_json"])
-        card_ids = json.loads(row["card_ids"])
-        return content, row["version"], card_ids, meta
-
-    # Delta snapshot — reconstruct from base
-    target_version = row["version"]
-    base_version = row["base_version"]
-
-    if base_version is None:
-        base_version = await _find_base_version(db, space_id, target_version)
-
-    if base_version is None:
-        log.warning("omni_delta_no_base", space_id=space_id, version=target_version)
-        return None, 0, [], {}
-
-    # Load base snapshot
-    base_rows = await db.execute_fetchall(
-        """SELECT content_json, card_ids FROM omni_snapshots
-           WHERE space_id = ? AND version = ? AND is_delta = 0""",
-        (space_id, base_version),
-    )
-
-    if not base_rows:
-        base_rows = await db.execute_fetchall(
-            """SELECT content_json, card_ids, version FROM omni_snapshots
-               WHERE space_id = ? AND is_delta = 0 AND version < ?
-               ORDER BY version DESC LIMIT 1""",
-            (space_id, target_version),
-        )
-        if not base_rows:
-            log.warning("omni_delta_base_missing", space_id=space_id, base=base_version)
-            return None, 0, [], {}
-        base_version = base_rows[0]["version"]
-
-    content = json.loads(base_rows[0]["content_json"])
-    card_ids = json.loads(base_rows[0]["card_ids"])
-
-    # Load all deltas from base+1 to target, in order
-    delta_rows = await db.execute_fetchall(
-        """SELECT version, content_json, card_ids FROM omni_snapshots
-           WHERE space_id = ? AND is_delta = 1
-             AND version > ? AND version <= ?
-           ORDER BY version ASC""",
-        (space_id, base_version, target_version),
-    )
-
-    for delta_row in delta_rows:
-        delta = json.loads(delta_row["content_json"])
-        delta_card_ids = json.loads(delta_row["card_ids"])
-        content = _apply_delta(content, delta)
-        card_ids = card_ids + [cid for cid in delta_card_ids if cid not in card_ids]
-
-    return content, target_version, card_ids, meta
-
 # ---------------------------------------------------------------------------
 # Queue processor — polls omni_queue table instead of in-memory list.
 # Cards are enqueued by emit.py in the same transaction as the card persist,
@@ -310,19 +125,6 @@ async def _load_full_snapshot(
 # ---------------------------------------------------------------------------
 _POLL_INTERVAL_SECONDS = 10
 _queue_task: asyncio.Task | None = None
-
-# Per-space gate: when a space has an active resynthesis, its asyncio.Event
-# is *cleared* (blocking). When resynthesis finishes it is *set* (unblocked).
-_resynthesis_gates: dict[str, asyncio.Event] = {}
-
-
-def _get_gate(space_id: str) -> asyncio.Event:
-    """Get or create the resynthesis gate for a space (default: open)."""
-    if space_id not in _resynthesis_gates:
-        ev = asyncio.Event()
-        ev.set()  # open by default — no resynthesis running
-        _resynthesis_gates[space_id] = ev
-    return _resynthesis_gates[space_id]
 
 
 def start_omni_processor() -> None:
@@ -387,7 +189,7 @@ async def _process_queue() -> None:
     skipped_ids: list[str] = []
     for row in rows:
         sid = row["space_id"]
-        gate = _get_gate(sid)
+        gate = get_gate(sid)
         if not gate.is_set():
             # Resynthesis running for this space — leave in queue
             skipped_ids.append(row["card_id"])
@@ -435,7 +237,7 @@ async def _append_to_recent(cards: list[dict]) -> None:
 
     for space_id, space_cards in by_space.items():
         # Load latest snapshot (reconstructed if delta chain)
-        content, version, existing_card_ids, _meta = await _load_full_snapshot(db, space_id)
+        content, version, existing_card_ids, _meta = await load_full_snapshot(db, space_id)
 
         is_first = content is None
         if is_first:
@@ -612,590 +414,3 @@ async def _append_to_recent(cards: list[dict]) -> None:
             version=new_version,
             new_items=len(new_card_ids),
         )
-
-
-# ---------------------------------------------------------------------------
-# Full resynthesis (LLM-powered)
-# ---------------------------------------------------------------------------
-
-# `_TERMINAL_STATUSES` is imported from card_lifecycle at module top (single source
-# of truth): a subject in one of these statuses is resolved and leaves the attention
-# section. No local mirror — that previously risked silent divergence.
-_PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-
-
-async def _fetch_card_meta(db, card_ids: list[str]) -> dict[str, dict]:
-    """Fetch live per-card state for a set of card_ids.
-
-    Returns ``{card_id: {status, priority, entity_id, created_at, resolved_at,
-    source_platform}}``. The last three feed the API's per-item ``live``
-    decoration (item age, resolution timestamps, the platform-mix instrument);
-    the pipeline itself only reads status/priority/entity_id.
-    """
-    if not card_ids:
-        return {}
-    unique_ids = list(dict.fromkeys(card_ids))
-    placeholders = ",".join("?" for _ in unique_ids)
-    rows = await db.execute_fetchall(
-        f"""SELECT ac.card_id, ac.status, ac.priority, ac.entity_id,
-                   ac.created_at, ac.resolved_at, e.source_platform
-            FROM action_cards ac
-            LEFT JOIN events e ON ac.event_id = e.event_id
-            WHERE ac.card_id IN ({placeholders})""",
-        unique_ids,
-    )
-    return {
-        r["card_id"]: {
-            "status": r["status"],
-            "priority": r["priority"],
-            "entity_id": r["entity_id"],
-            "created_at": r["created_at"],
-            "resolved_at": r["resolved_at"],
-            "source_platform": r["source_platform"] or "unknown",
-        }
-        for r in rows
-    }
-
-
-def _item_source_cards(item: dict) -> list[str]:
-    return [c for c in item.get("source_cards", []) if c]
-
-
-def _live_max_priority(card_ids: list[str], meta: dict[str, dict]) -> str | None:
-    """Highest priority among non-terminal source cards, or None if all resolved/unknown."""
-    best: str | None = None
-    best_rank = 99
-    for cid in card_ids:
-        m = meta.get(cid)
-        if not m or m.get("status") in _TERMINAL_STATUSES:
-            continue
-        rank = _PRIORITY_ORDER.get(m.get("priority", "MEDIUM"), 2)
-        if rank < best_rank:
-            best_rank = rank
-            best = m.get("priority", "MEDIUM")
-    return best
-
-
-def _all_resolved(card_ids: list[str], meta: dict[str, dict]) -> bool:
-    """True if there is at least one known source card and ALL are terminal."""
-    known = [meta[cid] for cid in card_ids if cid in meta]
-    if not known:
-        return False
-    return all(m.get("status") in _TERMINAL_STATUSES for m in known)
-
-
-async def run_omni_resynthesis(
-    space_id: str | None = None,
-    snapshot_type: str = "scheduled",
-) -> list[str]:
-    """Run a full Omni resynthesis for one or all spaces.
-
-    This is the expensive operation — it calls the LLM to compress the
-    recent layer into period aggregates, fold old periods into milestones,
-    and surface attention items.
-
-    Args:
-        space_id: Specific space to resynthesize, or None for all spaces.
-        snapshot_type: "scheduled" (EOD), "rolling" (interval/threshold), or "manual".
-
-    Returns:
-        List of snapshot_ids created.
-    """
-    settings = load_settings()
-    omni_cfg = settings.get("omni", {})
-    density = omni_cfg.get("density", "compact")
-    try:
-        event_threshold = int(omni_cfg.get("event_threshold", 50))
-    except (TypeError, ValueError):
-        event_threshold = 50
-    event_threshold = max(0, min(100, event_threshold))
-
-    db = await get_db()
-
-    # Determine which spaces to process
-    if space_id:
-        space_ids = [space_id]
-    else:
-        space_rows = await db.execute_fetchall("SELECT space_id FROM spaces")
-        space_ids = [row["space_id"] for row in space_rows] if space_rows else ["default"]
-        # Ensure default is always included
-        if "default" not in space_ids:
-            space_ids.append("default")
-
-    created_ids = []
-
-    for sid in space_ids:
-        try:
-            snapshot_id = await _resynthesize_space(db, sid, density, snapshot_type, event_threshold)
-            if snapshot_id:
-                created_ids.append(snapshot_id)
-        except Exception as e:
-            log.error("omni_resynthesis_failed", space_id=sid, error=str(e))
-
-    return created_ids
-
-
-async def _resynthesize_space(
-    db,
-    space_id: str,
-    density: str,
-    snapshot_type: str = "scheduled",
-    event_threshold: int = 50,
-) -> str | None:
-    """Resynthesize Omni for a single space.
-
-    Gates the queue processor for this space during the LLM call so that
-    incremental updates don't race with the resynthesis snapshot write.
-    Cards that arrive during resynthesis stay in omni_queue and are
-    processed on the next poll after the gate reopens.
-    """
-    gate = _get_gate(space_id)
-
-    # 1. Load latest snapshot (reconstructed if delta chain)
-    current_snapshot, current_version, existing_card_ids, _meta = await _load_full_snapshot(db, space_id)
-
-    # The pre-fold sections, kept separately because `current_snapshot` may be
-    # discarded below (degenerate recovery) and is fed forward through the LLM
-    # calls. The change summary must diff against what the user was ACTUALLY
-    # looking at, so it reads this copy.
-    prior_sections = copy.deepcopy((current_snapshot or {}).get("sections", []))
-
-    # Recovery: if the last snapshot is itself degenerate (a prior bad synthesis
-    # poisoned the chain), don't feed it back to the model — that just makes it
-    # echo the '...'. Drop it so this run regenerates real content from scratch;
-    # item_states/resolved-pruning below are skipped when there's no snapshot.
-    if current_snapshot and _is_degenerate_sections(current_snapshot.get("sections", [])):
-        log.warning(
-            "omni_resynthesis_discarding_degenerate_snapshot",
-            space_id=space_id, version=current_version,
-        )
-        current_snapshot = None
-
-    # 2. Load pinned items
-    pin_rows = await db.execute_fetchall(
-        "SELECT item_text, source_card_ids, platforms FROM omni_pins WHERE space_id = ?",
-        (space_id,),
-    )
-    pinned_items = [
-        {
-            "item_text": row["item_text"],
-            "source_card_ids": json.loads(row["source_card_ids"]),
-            "platforms": json.loads(row["platforms"]),
-        }
-        for row in pin_rows
-    ]
-
-    # 3. Query recent cards (since last successful resynthesis)
-    last_synth_row = await db.execute_fetchall(
-        """SELECT generated_at FROM omni_snapshots
-           WHERE space_id = ? AND snapshot_type IN ('scheduled', 'rolling', 'manual')
-           ORDER BY version DESC LIMIT 1""",
-        (space_id,),
-    )
-
-    # generated_at and resolved_at are both stored in canonical DB format now
-    # (space-separated UTC — see laya/db/timeutil.py), so one space-format `since`
-    # bound compares correctly against both created_at and resolved_at.
-    raw = last_synth_row[0]["generated_at"] if last_synth_row else None
-    since = raw if raw else "2000-01-01 00:00:00"
-
-    # Fetch cap scales with event_threshold so users who tolerate larger
-    # per-run batches get proportional headroom for failure recovery. Floor
-    # is 100 (also applies when threshold is disabled).
-    fetch_cap = max(100, 3 * event_threshold) if event_threshold > 0 else 100
-
-    card_rows = await db.execute_fetchall(
-        """SELECT ac.card_id, ac.header, ac.summary, ac.priority, ac.persona,
-                  ac.status, ac.user_feedback, ac.category, ac.entity_id,
-                  e.source_platform, e.actor_name
-           FROM action_cards ac
-           LEFT JOIN events e ON ac.event_id = e.event_id
-           WHERE ac.space_id = ? AND ac.created_at > ?
-           ORDER BY ac.created_at DESC
-           LIMIT ?""",
-        (space_id, since, fetch_cap),
-    )
-
-    new_cards = [
-        {
-            "card_id": row["card_id"],
-            "header": row["header"],
-            "summary": row["summary"],
-            "priority": row["priority"],
-            "source_platform": row["source_platform"] or "unknown",
-            "user_feedback": row["user_feedback"],
-            "status": row["status"],
-            "entity_id": row["entity_id"],
-        }
-        for row in card_rows
-    ]
-
-    # Enrich cards with tags for the LLM prompt
-    from laya.pipeline.tags import batch_load_tags
-    omni_card_ids = [c["card_id"] for c in new_cards]
-    tags_map = await batch_load_tags(omni_card_ids)
-    for c in new_cards:
-        card_tag_entries = tags_map.get(("card", c["card_id"]), [])
-        c["tags"] = ", ".join(t["tag_name"] for t in card_tag_entries) if card_tag_entries else ""
-
-    # 4. Separate user-acted cards (for higher weight in prompt)
-    acted_cards = [
-        c for c in new_cards
-        if c.get("user_feedback") or c.get("status") in ("done", "dismissed", "archived")
-    ]
-
-    # If no new cards, skip — nothing has changed since the last synthesis.
-    # (No snapshot + no cards = first run with nothing to process;
-    #  existing snapshot + no cards = redundant LLM call with identical input.)
-    if not new_cards:
-        log.info("omni_resynthesis_skipped_no_new_cards", space_id=space_id)
-        return None
-
-    # Visibility: warn when the fetch cap is saturated. Under the default
-    # trigger config this should be rare; if it fires repeatedly, check for
-    # recent LLM failures or misconfigured triggers before trusting the
-    # summary (cards beyond the window are silently dropped from the LLM
-    # input, though they remain in the incremental snapshot).
-    if len(new_cards) >= fetch_cap:
-        log.warning(
-            "omni_resynthesis_cards_saturated",
-            space_id=space_id,
-            cap=fetch_cap,
-            event_threshold=event_threshold,
-            since=since,
-        )
-
-    # 4b. Derive the live state of the CURRENT snapshot's items so the LLM can
-    # drop subjects that have since resolved or de-escalated. Resynthesis is
-    # otherwise blind to status-only transitions of cards created before `since`
-    # (they don't reappear in `new_cards`), so without this an attention item
-    # sticks forever. We compute state from each item's source_cards because the
-    # auto-resolution path (emit.py) transitions the very sibling cards embedded
-    # in the aggregate to a terminal status.
-    item_states: list[dict] = []
-    if current_snapshot:
-        snapshot_card_ids: list[str] = []
-        for section in current_snapshot.get("sections", []):
-            if section.get("type") not in ("attention", "recent"):
-                continue
-            for item in section.get("items", []):
-                snapshot_card_ids.extend(_item_source_cards(item))
-        snap_meta = await _fetch_card_meta(db, snapshot_card_ids)
-        for section in current_snapshot.get("sections", []):
-            if section.get("type") not in ("attention", "recent"):
-                continue
-            for item in section.get("items", []):
-                cids = _item_source_cards(item)
-                if not cids:
-                    continue
-                item_states.append({
-                    "text": item.get("text", ""),
-                    "all_resolved": _all_resolved(cids, snap_meta),
-                    "live_max_priority": _live_max_priority(cids, snap_meta),
-                })
-
-    # 4c. Subjects that reached a terminal state since the last synthesis.
-    resolved_rows = await db.execute_fetchall(
-        """SELECT entity_id, header, status, resolved_at
-           FROM action_cards
-           WHERE space_id = ? AND resolved_at IS NOT NULL AND resolved_at > ?
-             AND status IN ('done', 'dismissed', 'archived')
-           ORDER BY resolved_at DESC LIMIT 100""",
-        (space_id, since),
-    )
-    resolved_cards: list[dict] = []
-    _seen_entities: set[str] = set()
-    # entity_id → when that subject reached a terminal state. The changelog rail
-    # renders "closed 14:22" beside a resolved line; the card that resolved a
-    # subject is often NOT one of the aggregate's own source_cards (a merge event
-    # mints a new card on the same entity), so the timestamp is keyed by entity.
-    resolved_at_by_entity: dict[str, str] = {}
-    for r in resolved_rows:
-        eid = r["entity_id"]
-        if eid and r["resolved_at"] and eid not in resolved_at_by_entity:
-            resolved_at_by_entity[eid] = r["resolved_at"]
-        if eid and eid in _seen_entities:
-            continue  # dedupe by entity — one resolution line per subject
-        if eid:
-            _seen_entities.add(eid)
-        resolved_cards.append({
-            "entity_id": eid,
-            "header": r["header"],
-            "status": r["status"],
-        })
-
-    # 5. Fold the new cards into the snapshot across one or more LLM calls.
-    #
-    # Small batches run as a SINGLE call, byte-identical to the pre-P6-13 path.
-    # Large bursts are folded in chunks of _RESYNTH_CHUNK_SIZE across sequential
-    # calls, each folding one chunk into the evolving snapshot, so no single call
-    # carries the whole burst (see the constant's comment for why that matters).
-    #
-    # Ordering: new_cards is newest-first (created_at DESC), so we fold the
-    # OLDEST chunk first and the newest last — that way the freshest cards land
-    # in the final call and dominate the "recent" section. Snapshot-relative
-    # inputs (item_states / resolved_cards, which prune subjects that resolved
-    # since the last synthesis) apply only to the FIRST fold; afterwards the
-    # evolving snapshot already reflects them. Pins carry through every fold, and
-    # each chunk brings its own acted cards.
-    #
-    # Failure handling is deliberately all-or-nothing: if any chunk fails to
-    # parse we discard the whole run and return None WITHOUT storing, leaving
-    # `since` unadvanced so every card returns next run. That avoids the plumbing
-    # needed to store a partial fold without silently dropping the un-folded
-    # cards (the fetch is purely `since`-driven — line ~724), and because each
-    # chunk is small the retry almost always succeeds. The previous snapshot
-    # stays on screen until it does.
-    schema = get_omni_json_schema(density)
-
-    chunks = [
-        new_cards[i:i + _RESYNTH_CHUNK_SIZE]
-        for i in range(0, len(new_cards), _RESYNTH_CHUNK_SIZE)
-    ]
-    chunks.reverse()  # oldest chunk first, newest last
-
-    # --- GATE: pause queue processing for this space during the LLM call(s) ---
-    gate.clear()
-    log.info("omni_resynthesis_gate_closed", space_id=space_id, chunks=len(chunks))
-
-    # 6. Call LLM (once per chunk)
-    try:
-        folded_snapshot = current_snapshot
-        result_sections: list[dict] = []
-        for idx, chunk in enumerate(chunks):
-            first = idx == 0
-            chunk_acted = [
-                c for c in chunk
-                if c.get("user_feedback")
-                or c.get("status") in ("done", "dismissed", "archived")
-            ]
-            messages = build_omni_resynthesis_messages(
-                current_snapshot=folded_snapshot,
-                new_cards=chunk,
-                acted_cards=chunk_acted,
-                pinned_items=pinned_items,
-                density=density,
-                space_id=space_id,
-                # Prune-resolved hints only make sense against the ORIGINAL
-                # snapshot — apply them once, on the first fold.
-                item_states=item_states if first else [],
-                resolved_cards=resolved_cards if first else [],
-            )
-            response = await llm_call(
-                role="omni",
-                messages=messages,
-                response_schema=schema,
-                step="omni_resynthesis",
-                temperature=0.3,
-                max_tokens=DEFAULT_MAX_TOKENS,
-                space_id=space_id,
-            )
-
-            if not response.parsed:
-                truncation_hint = " (response was truncated)" if response.truncated else ""
-                raise ValueError(
-                    f"LLM returned malformed JSON for Omni resynthesis "
-                    f"chunk {idx + 1}/{len(chunks)}{truncation_hint} "
-                    f"(output_tokens={response.output_tokens}, model={response.model})"
-                )
-
-            result_sections = response.parsed.get("sections", [])
-            folded_snapshot = response.parsed  # feed the fold forward
-
-    except Exception as e:
-        log.error("omni_resynthesis_llm_failed", space_id=space_id, error=str(e))
-        # Re-open the gate so queued cards resume processing
-        gate.set()
-        log.info("omni_resynthesis_gate_opened", space_id=space_id, reason="llm_failed")
-        return None
-
-    # Reject a degenerate ('...'-everywhere) result before it can be stored and
-    # poison the forward-carried snapshot — see _is_degenerate_sections. Treat it
-    # like a failed synthesis: keep the last good snapshot, retry next run.
-    if _is_degenerate_sections(result_sections):
-        log.warning(
-            "omni_resynthesis_degenerate_result",
-            space_id=space_id, items=sum(len(s.get("items", [])) for s in result_sections),
-        )
-        gate.set()
-        log.info("omni_resynthesis_gate_opened", space_id=space_id, reason="degenerate_result")
-        return None
-
-    # Reject an all-empty result (zero items across every section) for the same
-    # reason as the '...' skeleton above: it poisons the forward-carried snapshot.
-    # _is_degenerate_sections deliberately EXEMPTS the no-items case (it targets
-    # the placeholder-text variant), so the empty-collapse variant is caught here.
-    # We only reach this point with new_cards non-empty (the `if not new_cards`
-    # early-return above guarantees it), so a synthesis that folds real,
-    # un-summarized cards into *nothing* is a model failure, not a legitimately
-    # empty state — a mid-size local model can over-apply the prompt's "compress
-    # everything / an empty array is allowed" guidance and emit zero items.
-    # Storing it would wipe the recent items the incremental queue accumulated
-    # AND feed the empty snapshot back into the next run, so every later
-    # resynthesis stays empty (observed: high-volume space collapsing 13k→389
-    # bytes over successive rolling runs). Treat it as a failed synthesis: keep
-    # the last good snapshot, leave `since` unadvanced so these cards retry.
-    # NOTE: checked BEFORE the resolved-attention prune below, so a result whose
-    # items were legitimately dropped as resolved still stores (correctly empty)
-    # while a model that returned nothing does not.
-    if sum(len(s.get("items", [])) for s in result_sections) == 0:
-        log.warning(
-            "omni_resynthesis_empty_result",
-            space_id=space_id, new_cards=len(new_cards),
-        )
-        gate.set()
-        log.info("omni_resynthesis_gate_opened", space_id=space_id, reason="empty_result")
-        return None
-
-    # 7. Inject space_id into all items
-    for section in result_sections:
-        for item in section.get("items", []):
-            item["space_id"] = space_id
-
-    # 7b. Deterministic safety-net prune + entity_ids backfill.
-    # The prompt asks the LLM to drop resolved subjects, but a stubborn model can
-    # carry them anyway, and the status-only-transition path gives the LLM only a
-    # derived hint. So we authoritatively drop any *attention* item whose source
-    # cards are ALL terminal — that item cannot need attention. We also backfill
-    # entity_ids from source_cards when the LLM left them empty, so the NEXT
-    # resynthesis can correlate this subject reliably.
-    output_card_ids: list[str] = []
-    for section in result_sections:
-        for item in section.get("items", []):
-            output_card_ids.extend(_item_source_cards(item))
-    # Prior cards are fetched in the same batch: the change summary has to decide
-    # whether a line that VANISHED did so because its subjects resolved, and
-    # those cards are by definition absent from the new output.
-    for section in prior_sections:
-        for item in section.get("items", []):
-            output_card_ids.extend(_item_source_cards(item))
-    out_meta = await _fetch_card_meta(db, output_card_ids)
-
-    pruned_attention = 0
-    for section in result_sections:
-        is_attention = section.get("type") == "attention"
-        kept_items = []
-        for item in section.get("items", []):
-            cids = _item_source_cards(item)
-            if is_attention and _all_resolved(cids, out_meta):
-                pruned_attention += 1
-                continue  # every source subject resolved — drop from attention
-            # Backfill entity_ids the LLM omitted, from the live card metadata.
-            if not item.get("entity_ids"):
-                eids = []
-                for cid in cids:
-                    eid = (out_meta.get(cid) or {}).get("entity_id")
-                    if eid and eid not in eids:
-                        eids.append(eid)
-                item["entity_ids"] = eids
-            kept_items.append(item)
-        section["items"] = kept_items
-
-    if pruned_attention:
-        log.info("omni_attention_pruned", space_id=space_id, dropped=pruned_attention)
-
-    # 7c. Stamp item keys, then diff this result against what the user was
-    # looking at. Order matters: keys are computed from the FINAL entity_ids
-    # (backfilled just above), and the diff must see the post-prune sections so a
-    # resolved attention item reads as `resolved`, not as a silent disappearance.
-    decorate_item_keys(result_sections)
-    change_summary = compute_resynthesis_change_summary(
-        prior_sections,
-        result_sections,
-        out_meta,
-        _TERMINAL_STATUSES,
-        resolved_at_by_entity,
-    )
-
-    # 8. Build stats
-    cards_acted_count = len(acted_cards)
-    total_items_before = sum(
-        len(s.get("items", []))
-        for s in (current_snapshot or {}).get("sections", [])
-    ) + len(new_cards)
-    total_items_after = sum(len(s.get("items", [])) for s in result_sections)
-    compression = 1.0 - (total_items_after / max(total_items_before, 1))
-
-    content = {
-        "sections": result_sections,
-        "stats": {
-            "events_processed": len(existing_card_ids) + len(new_cards),
-            "cards_acted_on": cards_acted_count,
-            "compression_ratio": round(compression, 2),
-        },
-    }
-
-    # 9. Save new snapshot — re-read the current max version to avoid
-    #    collision with any incremental snapshots that were written before
-    #    the gate closed (the gate only blocks future queue polls).
-    now = db_now()
-    snapshot_id = f"omni_{uuid.uuid4().hex[:12]}"
-    all_card_ids = list(set(existing_card_ids + [c["card_id"] for c in new_cards]))
-
-    max_ver_rows = await db.execute_fetchall(
-        "SELECT COALESCE(MAX(version), 0) AS mv FROM omni_snapshots WHERE space_id = ?",
-        (space_id,),
-    )
-    new_version = max_ver_rows[0]["mv"] + 1
-
-    await db.execute(
-        """INSERT INTO omni_snapshots
-           (snapshot_id, space_id, version, generated_at, snapshot_type,
-            content_json, card_ids, events_processed, created_at,
-            is_delta, base_version, change_summary_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            snapshot_id,
-            space_id,
-            new_version,
-            now,
-            snapshot_type,
-            json.dumps(content),
-            json.dumps(all_card_ids),
-            len(all_card_ids),
-            now,
-            0,     # Full base snapshot, not a delta
-            None,
-            json.dumps(change_summary),
-        ),
-    )
-    await db.commit()
-
-    # Update cache with full state
-    _latest_cache[space_id] = {
-        "content": content,
-        "version": new_version,
-        "card_ids": all_card_ids,
-        "meta": {
-            "snapshot_id": snapshot_id,
-            "generated_at": now,
-            "snapshot_type": snapshot_type,
-        },
-    }
-
-    # --- GATE: re-open so queued cards resume on next poll ---
-    gate.set()
-    log.info("omni_resynthesis_gate_opened", space_id=space_id, reason="resynthesis_complete")
-
-    # 10. Broadcast
-    await publish({
-        "type": "omni_updated",
-        "payload": {
-            "space_id": space_id,
-            "version": new_version,
-            "snapshot_type": snapshot_type,
-            "sections_count": len(result_sections),
-        },
-    })
-
-    log.info(
-        "omni_resynthesis_complete",
-        space_id=space_id,
-        version=new_version,
-        snapshot_id=snapshot_id,
-        items=total_items_after,
-        compression=round(compression, 2),
-        **{f"changed_{k}": v for k, v in change_summary["counts"].items()},
-    )
-
-    return snapshot_id
