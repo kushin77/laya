@@ -7,17 +7,7 @@ mod rotating_log;
 mod runtime;
 mod sidecar;
 
-/// On Windows, attach CREATE_NO_WINDOW so spawned child processes do not
-/// flash a console window. No-op on other platforms.
-#[cfg(windows)]
-fn no_window(cmd: &mut std::process::Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn no_window(_cmd: &mut std::process::Command) {}
+use process_util::no_window;
 
 #[derive(serde::Serialize, Clone)]
 pub struct RepoDetection {
@@ -490,134 +480,10 @@ fn start_health_polling(tray: TrayIcon) {
         loop {
             std::thread::sleep(Duration::from_secs(30));
 
-            let engine_base = sidecar::engine_url();
-            let tooltip = match client.get(format!("{}/health", engine_base)).send() {
-                Ok(resp) => {
-                    if let Ok(body) = resp.json::<serde_json::Value>() {
-                        let engine = body.get("engine").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let n8n = body.get("n8n").and_then(|v| v.as_str()).unwrap_or("unknown");
-
-                        let pending = client
-                            .get(format!("{}/cards?status=pending&limit=1", engine_base))
-                            .send()
-                            .ok()
-                            .and_then(|r| r.json::<serde_json::Value>().ok())
-                            .and_then(|b| b.get("total").and_then(|v| v.as_u64()))
-                            .unwrap_or(0);
-
-                        format!(
-                            "Laya - Engine: {} | n8n: {} | {} pending",
-                            engine, n8n, pending
-                        )
-                    } else {
-                        "Laya - Engine: error parsing health".to_string()
-                    }
-                }
-                Err(_) => "Laya - Engine offline".to_string(),
-            };
-
+            let tooltip = sidecar::engine_health_summary(&client).tooltip();
             let _ = tray.set_tooltip(Some(&tooltip));
         }
     });
-}
-
-/// Return the lowercased command line for a pid (best-effort, empty on failure).
-/// Used to confirm a port-holder is actually a Laya process before we kill it.
-#[cfg(unix)]
-fn process_cmdline(pid: i32) -> String {
-    std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
-        .unwrap_or_default()
-}
-
-#[cfg(windows)]
-fn process_cmdline(pid: u32) -> String {
-    let mut cmd = std::process::Command::new("wmic");
-    no_window(&mut cmd);
-    cmd.args([
-        "process",
-        "where",
-        &format!("ProcessId={}", pid),
-        "get",
-        "CommandLine",
-    ])
-    .output()
-    .ok()
-    .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
-    .unwrap_or_default()
-}
-
-/// Best-effort kill of a *Laya* process listening on the given TCP port.
-/// Used as a safety net during shutdown to catch orphaned engine processes,
-/// and by n8n startup to reclaim the port from stale instances.
-///
-/// `identity` must appear (case-insensitively) in the port-holder's command
-/// line for it to be killed — otherwise an unrelated user process that happens
-/// to listen on the port would be SIGTERM'd (review §6). Both the engine and the
-/// Laya-managed n8n run from `~/.laya/...`, so "laya" identifies both. If the
-/// command line can't be read the process is left alone (safe default).
-#[cfg(unix)]
-pub(crate) fn kill_process_on_port(port: u16, identity: &str) {
-    if let Ok(output) = std::process::Command::new("lsof")
-        .args(["-ti", &format!("tcp:{}", port)])
-        .output()
-    {
-        if output.status.success() {
-            let pids = String::from_utf8_lossy(&output.stdout);
-            for pid_str in pids.split_whitespace() {
-                if let Ok(pid) = pid_str.parse::<i32>() {
-                    if !process_cmdline(pid).contains(identity) {
-                        log::warn!(
-                            "Port {} held by foreign process (pid {}); not killing",
-                            port,
-                            pid
-                        );
-                        continue;
-                    }
-                    log::info!("Killing orphaned process on port {} (pid {})", port, pid);
-                    unsafe { libc::kill(pid, libc::SIGTERM); }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-pub(crate) fn kill_process_on_port(port: u16, identity: &str) {
-    let mut netstat = std::process::Command::new("netstat");
-    no_window(&mut netstat);
-    if let Ok(output) = netstat.args(["-ano", "-p", "tcp"]).output() {
-        if !output.status.success() {
-            return;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let needle = format!(":{}", port);
-        for line in stdout.lines() {
-            if line.contains(&needle) && line.contains("LISTENING") {
-                if let Some(pid) = line
-                    .split_whitespace()
-                    .last()
-                    .and_then(|s| s.parse::<u32>().ok())
-                {
-                    if !process_cmdline(pid).contains(identity) {
-                        log::warn!(
-                            "Port {} held by foreign process (pid {}); not killing",
-                            port,
-                            pid
-                        );
-                        continue;
-                    }
-                    log::info!("Killing orphaned process on port {} (pid {})", port, pid);
-                    let mut tk = std::process::Command::new("taskkill");
-                    no_window(&mut tk);
-                    let _ = tk.args(["/F", "/PID", &pid.to_string()]).status();
-                }
-            }
-        }
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1165,7 +1031,7 @@ if(document.body)document.body.style.marginTop=bar.offsetHeight+'px';
                     // our cleanup above (race), or if we never got a handle,
                     // kill any process listening on the engine port (8420).
                     if !killed_engine {
-                        kill_process_on_port(sidecar::engine_port(), "laya");
+                        process_util::kill_process_on_port(sidecar::engine_port(), "laya");
                     }
 
                     log::info!("Stopping n8n process");
