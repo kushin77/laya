@@ -20,9 +20,10 @@ from urllib.parse import urlencode
 import httpx
 import structlog
 
+from laya.egress import provisioning
 from laya.egress.connections import (
     EGRESS_KEYCHAIN_SERVICE,
-    _provision_to_n8n,
+    _get_from_keychain,
     _store_in_keychain,
 )
 from laya.db.sqlite import get_db
@@ -332,11 +333,10 @@ async def handle_callback(
     display_name = connection_name or user_email or platform.title()
 
     if n8n_cred_id:
-        from laya.egress.connections import _clone_workflows_for_connection
         try:
-            activated, workflow_errors = await _clone_workflows_for_connection(
+            activated, workflow_errors = await provisioning.clone_workflows_for_connection(
                 platform, connection_id, display_name, n8n_cred_id,
-                space_id=space_id,
+                _get_from_keychain, space_id=space_id,
             )
             all_errors.extend(workflow_errors)
 
@@ -352,12 +352,9 @@ async def handle_callback(
                 "oauth_clone_failed_rolling_back",
                 platform=platform, connection_id=connection_id, error=str(e),
             )
-            from laya.egress.connections import (
-                _remove_connection_workflows,
-                _remove_from_keychain,
-            )
+            from laya.egress.connections import _remove_from_keychain
             try:
-                await _remove_connection_workflows(connection_id)
+                await provisioning.remove_connection_workflows(connection_id)
             except Exception:
                 pass
             _remove_from_keychain(connection_id, platform)
@@ -680,7 +677,7 @@ _PLATFORM_HTTP_CRED_TYPES: dict[str, str] = {
 
 # NOTE: the former async _setup_n8n_workflows lived here — a dead 157-line
 # duplicate of the credential-injection + activation flow already implemented
-# in egress/connections._clone_workflows_for_connection (the live path). It
+# in egress/provisioning.clone_workflows_for_connection (the live path). It
 # carried a third copy of the _PLATFORM_HTTP_CRED_TYPES matcher logic and was
 # never called; removed (review §5.7 — P7-9). The shared dict above stays.
 
