@@ -8,7 +8,54 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  engine-bundle:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.7.12'
+
+      - name: Verify lock installability
+        # Re-resolves and installs the pinned lock files into a throwaway venv
+        # and imports the engine on them (skipping the embedding model
+        # download and test suite), so a release can't ship a bundle whose
+        # requirements.lock was silently made unresolvable by an upstream
+        # package yank since engine-deps.yml's last green run.
+        run: bash scripts/smoke-install.sh --no-tests --no-embedding
+
+      - name: Bundle engine resources
+        run: bash scripts/bundle-engine.sh
+
+      - name: Bundle n8n workflows
+        run: bash scripts/bundle-n8n-workflows.sh
+
+      - name: Upload engine bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-bundle
+          path: ui/src-tauri/resources/engine
+
+  ui-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ui
+        run: npm run build
+
+  package-sign:
+    needs: [engine-bundle, ui-build]
     strategy:
       fail-fast: false
       matrix:
@@ -50,9 +97,11 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      - name: Bundle engine resources
-        shell: bash
-        run: bash scripts/bundle-engine.sh
+      - name: Download engine bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-bundle
+          path: ui/src-tauri/resources/engine
 
       - name: Download VC++ Redistributable (Windows only)
         # ChromaDB's Rust bindings (chromadb_rust_bindings.*.pyd) link against
