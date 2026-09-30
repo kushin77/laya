@@ -210,11 +210,11 @@ async def _mark_failed(event_id: str, error: str) -> None:
     # polled. Best-effort: a WS hiccup must never break the pipeline.
     if became_dead:
         try:
-            from laya.api.websocket import manager
+            from laya.events import publish
             from laya.api.audit_api import compute_failure_counts
 
             counts = await compute_failure_counts(db)
-            await manager.broadcast(
+            await publish(
                 {"type": "audit_failure", "payload": {**counts, "kind": "dead_event"}}
             )
         except Exception as e:
@@ -256,7 +256,7 @@ async def _load_persisted_router_output(event_id: str):
 
 async def process_event(event_id: str) -> None:
     """Run the full pipeline for a single event (with claim/complete/fail)."""
-    from laya.api.websocket import manager
+    from laya.events import publish
     from laya.models.classification import RouterOutput
     from laya.pipeline.ingest import run_ingest
     from laya.pipeline.router import run_router
@@ -291,7 +291,7 @@ async def process_event(event_id: str) -> None:
         filtered, filter_rule = await run_rules(event)
         if filtered:
             await _mark_filtered(event_id)
-            await manager.broadcast(
+            await publish(
                 {
                     "type": "event_classified",
                     "event_id": event.event_id,
@@ -339,7 +339,7 @@ async def process_event(event_id: str) -> None:
                     "requires_research": router_output.requires_research,
                 }
             )
-        await manager.broadcast(
+        await publish(
             {
                 "type": "event_classified",
                 "event_id": event.event_id,
@@ -389,7 +389,7 @@ async def _run_workers_pipeline(
     """Workers → Stager → Emit with pre-created card."""
     import uuid as _uuid
 
-    from laya.api.websocket import manager
+    from laya.events import publish
     from laya.pipeline.emit import run_emit
     from laya.pipeline.stager import run_stager
     from laya.pipeline.workers import run_workers
@@ -406,7 +406,7 @@ async def _run_workers_pipeline(
             (event.subject.title, card_id),
         )
         await db.commit()
-        await manager.broadcast(
+        await publish(
             {
                 "type": "card_updated",
                 "card_id": card_id,
@@ -450,7 +450,7 @@ async def _run_workers_pipeline(
             ),
         )
         await db.commit()
-        await manager.broadcast(
+        await publish(
             {
                 "type": "card_created",
                 "card_id": card_id,
