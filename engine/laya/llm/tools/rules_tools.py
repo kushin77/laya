@@ -13,7 +13,7 @@ from typing import Any
 import structlog
 from pydantic import TypeAdapter
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import load_rules, save_rules
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
@@ -70,7 +70,7 @@ _PROCESSING_OPERATORS = [
 
 
 async def _broadcast_rules_changed(rule_type: str) -> None:
-    await manager.broadcast({"type": "rules_changed", "payload": {"rule_type": rule_type}})
+    await publish({"type": "rules_changed", "payload": {"rule_type": rule_type}})
 
 
 async def _write_rules_audit(tool: str, action: str, detail: Any) -> None:
