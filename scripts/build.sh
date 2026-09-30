@@ -55,6 +55,7 @@ ENGINE_BUNDLE="$REPO_ROOT/ui/src-tauri/resources/engine"
 
 if [ "$SKIP_ENGINE" = false ]; then
     "$REPO_ROOT/scripts/bundle-engine.sh"
+    "$REPO_ROOT/scripts/bundle-n8n-workflows.sh"
     echo ""
 else
     echo "── Skipping engine bundling (--skip-engine) ──"
