@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import get_debounce_config
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
@@ -441,7 +441,7 @@ async def _run_summary_update(
         )
         await db.commit()
 
-        await manager.broadcast(
+        await publish(
             {
                 "type": "summary_updated",
                 "payload": {
