@@ -15,14 +15,7 @@
 		SuggestedAction
 	} from '$lib/api/types';
 	import { lastMessage } from '$lib/stores/websocket';
-	import {
-		chatOpen,
-		chatCardContext,
-		chatCardIds,
-		chatListOpen,
-		chatInputPreset,
-		pendingCardId
-	} from '$lib/stores/chat';
+	import { chatOpen, chatListOpen, chatSession, pendingCardId } from '$lib/stores/chat';
 	import { cardSize } from '$lib/stores/cardSize';
 	import { buildCardContext } from '$lib/utils/cardContext';
 	import { cardBucket } from '$lib/omni/buckets';
@@ -197,9 +190,12 @@
 	}
 
 	function openCardChat(prompt?: string) {
-		chatCardContext.set(buildCardContext(cards as ActionCard[]));
-		chatCardIds.set(chatContextIds());
-		if (prompt) chatInputPreset.set(prompt);
+		chatSession.update((s) => ({
+			...s,
+			cardContext: buildCardContext(cards as ActionCard[]),
+			cardIds: chatContextIds(),
+			...(prompt ? { inputPreset: prompt } : {})
+		}));
 		chatListOpen.set(false);
 		chatOpen.set(true);
 	}

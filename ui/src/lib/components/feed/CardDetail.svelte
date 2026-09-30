@@ -5,7 +5,7 @@
 	import { engineApi } from '$lib/api/engine';
 	import { goto } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { chatOpen, chatCardContext, chatCardIds, chatListOpen } from '$lib/stores/chat';
+	import { chatOpen, chatSession, chatListOpen } from '$lib/stores/chat';
 	import { buildSingleCardContext } from '$lib/utils/cardContext';
 	import { parseBackendDate } from '$lib/utils/datetime';
 	import { PRIORITY_LABELS, PRIORITY_COLORS } from '$lib/utils/cardVisuals';
@@ -658,8 +658,11 @@
 	}
 
 	function chatAbout() {
-		chatCardContext.set(buildSingleCardContext(card));
-		chatCardIds.set([card.card_id]);
+		chatSession.update((s) => ({
+			...s,
+			cardContext: buildSingleCardContext(card),
+			cardIds: [card.card_id]
+		}));
 		chatListOpen.set(false);
 		chatOpen.set(true);
 	}

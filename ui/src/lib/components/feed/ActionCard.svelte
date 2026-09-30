@@ -4,7 +4,7 @@
 	import type { ActionCard } from '$lib/api/types';
 	import { engineApi } from '$lib/api/engine';
 	import { goto } from '$app/navigation';
-	import { chatOpen, chatCardContext, chatCardIds, chatListOpen } from '$lib/stores/chat';
+	import { chatOpen, chatSession, chatListOpen } from '$lib/stores/chat';
 	import { buildSingleCardContext } from '$lib/utils/cardContext';
 	import { parseBackendDate, timeAgo as _timeAgo } from '$lib/utils/datetime';
 	import { cardColors } from '$lib/stores/cardColors';
@@ -299,8 +299,11 @@
 
 	function chatAbout(e: Event) {
 		e.stopPropagation();
-		chatCardContext.set(buildSingleCardContext(card));
-		chatCardIds.set([card.card_id]);
+		chatSession.update((s) => ({
+			...s,
+			cardContext: buildSingleCardContext(card),
+			cardIds: [card.card_id]
+		}));
 		chatListOpen.set(false);
 		chatOpen.set(true);
 	}
