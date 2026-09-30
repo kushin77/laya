@@ -10,6 +10,8 @@ from typing import Any
 import structlog
 from fastapi import WebSocket
 
+from laya.events import subscribe
+
 log = structlog.get_logger()
 
 
@@ -56,3 +58,5 @@ class ConnectionManager:
 
 # Singleton instance
 manager = ConnectionManager()
+
+subscribe(manager.broadcast)
