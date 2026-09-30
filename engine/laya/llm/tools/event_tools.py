@@ -19,6 +19,117 @@ from laya.llm.tools.constants import (
 )
 
 
+def get_read_definitions() -> list[dict]:
+    """OpenAI function-calling schemas for the event read tools."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_events",
+                "description": (
+                    "Search raw events by keyword, platform, or actor. "
+                    "Returns paginated results — check 'has_more' and use 'offset' to retrieve additional pages."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Free-text search query to match against subject and content.",
+                        },
+                        "platform": {
+                            "type": "string",
+                            "description": "Filter by source platform (e.g. 'jira', 'slack', 'gmail', 'bitbucket', 'calendar').",
+                        },
+                        "actor": {
+                            "type": "string",
+                            "description": "Filter by actor name or email (partial match).",
+                        },
+                        "date_from": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the start of a time range "
+                                "filter (inclusive). Examples: '2026-04-01', '2026-04-01T00:00:00Z'. "
+                                "Use when the user mentions a time period like 'last month', "
+                                "'since April', 'past 2 weeks'. Omit if no temporal intent."
+                            ),
+                        },
+                        "date_to": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the end of a time range "
+                                "filter (inclusive). Examples: '2026-04-30', '2026-04-30T23:59:59Z'. "
+                                "Use when the user mentions a bounded time period like "
+                                "'in April', 'last week', 'between March and May'. Omit for "
+                                "open-ended ranges like 'since April'."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 20, max 200).",
+                            "default": 20,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0). Use with 'total' and 'has_more' from results to page through all matches.",
+                            "default": 0,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_event",
+                "description": "Get full details of a specific event by its ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "event_id": {
+                            "type": "string",
+                            "description": "The event ID.",
+                        },
+                    },
+                    "required": ["event_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_recent_activity",
+                "description": (
+                    "Get the most recent events and cards across all platforms. "
+                    "Returns paginated results — check 'has_more_events'/'has_more_cards' and use 'offset' to page."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "hours": {
+                            "type": "integer",
+                            "description": "Look back this many hours (default 24).",
+                            "default": 24,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results per category (default 10, max 200).",
+                            "default": 10,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0).",
+                            "default": 0,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+    ]
+
+
 async def search_events(
     query: str | None = None,
     platform: str | None = None,
