@@ -397,8 +397,8 @@ async def on_month_rollover(previous_month: str) -> None:
 
 async def _broadcast_budget_status(paused: bool) -> None:
     """Notify all connected WebSocket clients about budget pause status."""
-    from laya.api.websocket import manager
-    await manager.broadcast({
+    from laya.events import publish
+    await publish({
         "type": "budget_status",
         "paused": paused,
     })
