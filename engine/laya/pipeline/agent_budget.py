@@ -348,7 +348,7 @@ async def maybe_resume_agent_budget() -> None:
 
 async def _broadcast_status(paused: bool) -> None:
     try:
-        from laya.api.websocket import manager
-        await manager.broadcast({"type": "agent_budget_status", "paused": paused})
+        from laya.events import publish
+        await publish({"type": "agent_budget_status", "paused": paused})
     except Exception as e:
         log.warning("agent_budget_broadcast_failed", error=str(e))
