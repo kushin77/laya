@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator
 import structlog
 
 from laya.agents.base import BaseCodingAgent
+from laya.agents.cli_protocol import build_claude_base_args, classify_tool
 from laya.agents.mcp_config import (
     augment_prompt_with_mcp_hint,
     laya_allowed_tool_flags,
@@ -27,7 +28,14 @@ from laya.models.workspace import (
 
 log = structlog.get_logger()
 
-# Regex patterns for detecting approval prompts in agent output
+# Regex patterns for detecting approval prompts in agent output.
+#
+# NOTE: this is a larger superset than cli_protocol.APPROVAL_PATTERNS (shared
+# by gemini_cli.py/codex_cli.py/pi_cli.py) and is intentionally NOT migrated
+# there: _is_approval_prompt() below is hardcoded to `return False` (Claude
+# Code runs in --print mode, which is non-interactive), so this list is dead
+# code today. Left as-is rather than folded into the shared module to avoid
+# quietly resurrecting different matching behavior if/when it's re-enabled.
 APPROVAL_PATTERNS = [
     re.compile(r"Do you want to (proceed|continue|allow|approve)\?", re.IGNORECASE),
     re.compile(
@@ -97,13 +105,7 @@ class ClaudeCodeAgent(BaseCodingAgent):
         self._mcp_config_paths.append(mcp_config_path)
         effective_prompt = augment_prompt_with_mcp_hint(prompt)
 
-        args = [
-            self._binary,
-            "-p",
-            effective_prompt,
-            "--output-format",
-            "stream-json",
-            "--verbose",
+        args = build_claude_base_args(self._binary, effective_prompt) + [
             "--permission-mode",
             permission_mode,
             "--mcp-config",
@@ -170,15 +172,9 @@ class ClaudeCodeAgent(BaseCodingAgent):
         mcp_config_path = write_laya_mcp_config_file(space_id)
         self._mcp_config_paths.append(mcp_config_path)
 
-        args = [
-            self._binary,
-            "-p",
-            answer_text,
+        args = build_claude_base_args(self._binary, answer_text) + [
             "--resume",
             self._cc_session_id,
-            "--output-format",
-            "stream-json",
-            "--verbose",
             "--permission-mode",
             permission_mode,
             "--mcp-config",
@@ -354,14 +350,13 @@ class ClaudeCodeAgent(BaseCodingAgent):
 
         return []
 
-    @staticmethod
-    def _classify_tool(tool_name: str) -> WorkspaceEventType:
+    _READ_TOOL_NAMES = ("Read", "ReadFile", "read_file")
+    _WRITE_TOOL_NAMES = ("Write", "WriteFile", "Edit", "edit_file")
+
+    @classmethod
+    def _classify_tool(cls, tool_name: str) -> WorkspaceEventType:
         """Map a tool name to the appropriate WorkspaceEventType."""
-        if tool_name in ("Read", "ReadFile", "read_file"):
-            return WorkspaceEventType.FILE_READ
-        if tool_name in ("Write", "WriteFile", "Edit", "edit_file"):
-            return WorkspaceEventType.FILE_WRITE
-        return WorkspaceEventType.TOOL_CALL
+        return classify_tool(tool_name, cls._READ_TOOL_NAMES, cls._WRITE_TOOL_NAMES)
 
     def _is_approval_prompt(self, text: str) -> bool:
         """Check if a line of text is an approval prompt."""

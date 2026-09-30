@@ -39,6 +39,7 @@ from typing import Any
 
 import structlog
 
+from laya.agents.cli_protocol import build_claude_base_args
 from laya.agents.subprocess_helper import AgentProcess
 from laya.config import detect_agent_paths, get_agent_binary
 
@@ -279,8 +280,9 @@ def _build_args(
         # stream-json (+ --verbose, required) instead of plain json so we also capture the
         # rate_limit_event (window reset + status) for agent usage-budgeting; the final
         # `result` event still carries structured_output + usage + total_cost_usd.
-        args = [binary, "-p", user_prompt, "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "default", "--disallowedTools", _CLAUDE_BUILTIN_TOOLS]
+        args = build_claude_base_args(binary, user_prompt) + [
+            "--permission-mode", "default", "--disallowedTools", _CLAUDE_BUILTIN_TOOLS,
+        ]
         if system_text:
             args += ["--append-system-prompt", system_text]
         if model_string:
