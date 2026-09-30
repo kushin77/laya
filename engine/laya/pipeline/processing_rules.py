@@ -405,7 +405,7 @@ async def _exec_run_agent(
             from laya.config import load_repos
             from laya.workers.engineer import resolve_repo_path
             from laya.models.classification import Category, Persona, Priority, RouterOutput as RO
-            from laya.api.cards_api import _stream_entity_agent
+            from laya.api.cards_agent import _stream_entity_agent
             from laya.tasks import create_task as create_tracked_task
 
             # Reuse the entity's existing workspace instead of spawning a duplicate.

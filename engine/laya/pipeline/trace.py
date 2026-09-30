@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from laya.api.cards_api import CARD_SELECT_COLUMNS, _row_to_card
+from laya.api.cards_common import CARD_SELECT_COLUMNS, _row_to_card
 from laya.pipeline.queue import _get_semaphore
 from laya.events import publish
 from laya.db.chromadb_store import memory_search
