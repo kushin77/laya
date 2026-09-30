@@ -10,7 +10,6 @@ from typing import Any
 
 import structlog
 
-from laya.api.websocket import manager
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now, db_ts_from_epoch
 from laya.llm.tools.constants import (
