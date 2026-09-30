@@ -25,7 +25,7 @@ class TestActionsAPI:
         )
 
         with patch("laya.egress.route_and_execute", new_callable=AsyncMock, return_value=mock_egress_result):
-            with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+            with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
                 from laya.main import app
 
                 transport = ASGITransport(app=app)
@@ -45,7 +45,7 @@ class TestActionsAPI:
 
     async def test_execute_action_400_on_bad_card(self, db):
         """POST /actions/execute returns 400 for non-existent card."""
-        with patch("laya.pipeline.executor.manager.broadcast", new_callable=AsyncMock):
+        with patch("laya.api.websocket.manager.broadcast", new_callable=AsyncMock):
             from laya.main import app
 
             transport = ASGITransport(app=app)
