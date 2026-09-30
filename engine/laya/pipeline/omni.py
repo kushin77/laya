@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import load_settings
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
@@ -596,7 +596,7 @@ async def _append_to_recent(cards: list[dict]) -> None:
         }
 
         # Broadcast update
-        await manager.broadcast({
+        await publish({
             "type": "omni_updated",
             "payload": {
                 "space_id": space_id,
@@ -1178,7 +1178,7 @@ async def _resynthesize_space(
     log.info("omni_resynthesis_gate_opened", space_id=space_id, reason="resynthesis_complete")
 
     # 10. Broadcast
-    await manager.broadcast({
+    await publish({
         "type": "omni_updated",
         "payload": {
             "space_id": space_id,

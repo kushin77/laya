@@ -239,8 +239,8 @@ async def _generate_title_background(
         # Notify any connected UI clients so the sidebar updates without
         # needing to re-fetch the full conversation list.
         try:
-            from laya.api.websocket import manager
-            await manager.broadcast({
+            from laya.events import publish
+            await publish({
                 "type": "conversation_title_updated",
                 "conversation_id": conversation_id,
                 "title": title,

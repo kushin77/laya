@@ -88,9 +88,9 @@ async def handle_open_compose(
     arguments: dict, space_id: str | None
 ) -> str:
     """Open the compose editor in the UI via WebSocket broadcast."""
-    from laya.api.websocket import manager
+    from laya.events import publish
 
-    await manager.broadcast({
+    await publish({
         "type": "open_compose",
         "payload": {
             "platform": arguments["platform"],

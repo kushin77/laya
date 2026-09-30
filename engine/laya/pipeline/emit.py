@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import load_settings
 from laya.db.chromadb_store import embed_document
 from laya.db.sqlite import get_db
@@ -540,7 +540,7 @@ async def _broadcast_card(
     # Pre-created cards (agent_running → pending transition) use card_updated so the
     # feed patches the existing card in-place rather than triggering a full reload.
     ws_type = "card_updated" if pre_created else "card_created"
-    await manager.broadcast(
+    await publish(
         {
             "type": ws_type,
             "card_id": card_id,
@@ -559,7 +559,7 @@ async def _broadcast_card(
     )
     # If this card carried forward an existing group, notify the UI.
     if is_carry_forward:
-        await manager.broadcast(
+        await publish(
             {
                 "type": "group_carried_forward",
                 "card_id": card_id,
@@ -773,7 +773,7 @@ async def run_emit(
     )
     if assigned_context_id:
         try:
-            await manager.broadcast({
+            await publish({
                 "type": "card_updated",
                 "card_id": card_id,
                 "payload": {"context_id": assigned_context_id},

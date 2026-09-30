@@ -10,7 +10,7 @@ import json
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import get_debounce_config, load_settings
 from laya.db.sqlite import get_db
 from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
@@ -264,7 +264,7 @@ async def _initial_generation(
     await db.commit()
 
     summary_data = _build_response_dict(entity_id, parsed, card_ids)
-    await manager.broadcast({
+    await publish({
         "type": "group_summary_updated",
         "entity_id": entity_id,
         "summary": summary_data,
@@ -369,7 +369,7 @@ async def _rolling_update(
     await db.commit()
 
     summary_data = _build_response_dict(entity_id, parsed, card_ids)
-    await manager.broadcast({
+    await publish({
         "type": "group_summary_updated",
         "entity_id": entity_id,
         "summary": summary_data,
@@ -540,7 +540,7 @@ async def _generate_context_summary(
     await db.commit()
 
     summary_data = _build_response_dict(context_id, parsed, card_ids)
-    await manager.broadcast({
+    await publish({
         "type": "group_summary_updated",
         "entity_id": context_id,
         "summary": summary_data,

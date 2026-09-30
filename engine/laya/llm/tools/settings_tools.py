@@ -12,7 +12,7 @@ from typing import Any
 
 import structlog
 
-from laya.api.websocket import manager
+from laya.events import publish
 from laya.config import load_settings, save_settings
 from laya.db.sqlite import get_db
 
@@ -144,7 +144,7 @@ async def update_theme(theme: str) -> dict[str, Any]:
     save_settings(settings)
 
     # Broadcast so any open tab updates immediately without a page reload
-    await manager.broadcast(
+    await publish(
         {
             "type": "settings_changed",
             "payload": {"section": "appearance", "new_value": {"theme": theme}},
@@ -435,7 +435,7 @@ async def update_smart_grouping(
     settings["smart_grouping"] = grouping
     save_settings(settings)
 
-    await manager.broadcast(
+    await publish(
         {
             "type": "settings_changed",
             "payload": {"section": "smart_grouping", "new_value": grouping},

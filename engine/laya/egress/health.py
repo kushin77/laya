@@ -157,10 +157,10 @@ async def _run_health_checks() -> None:
 
         # Broadcast status changes
         try:
-            from laya.api.websocket import manager
+            from laya.events import publish
 
             for change in status_changes:
-                await manager.broadcast({
+                await publish({
                     "type": "connection_status",
                     "connection_id": change["connection_id"],
                     "platform": change["platform"],
