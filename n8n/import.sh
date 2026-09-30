@@ -19,8 +19,11 @@ for workflow_file in "$WORKFLOW_DIR"/*.json; do
 
     if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
         echo "    OK"
+    elif [ "$http_code" = "409" ] || { [ "$http_code" = "400" ] && echo "$body" | grep -qi "already exists"; }; then
+        echo "    Already imported (duplicate workflow name), skipping"
     else
-        echo "    Warning: HTTP $http_code — you may need to set an API key or import manually via the n8n UI"
+        echo "    ERROR: HTTP $http_code importing $name — $body" >&2
+        exit 1
     fi
 done
 
