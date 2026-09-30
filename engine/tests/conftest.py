@@ -298,7 +298,7 @@ def mock_llm_router():
     """Patch litellm.acompletion to return a router classification."""
     mock_resp = _make_mock_llm_response(MOCK_ROUTER_RESPONSE)
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_resp) as mock:
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield mock
@@ -354,7 +354,7 @@ def mock_llm_comms():
     """Patch litellm.acompletion to return a comms classification."""
     mock_resp = _make_mock_llm_response(MOCK_COMMS_RESPONSE)
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_resp) as mock:
-        with patch("laya.llm.client.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"router": "claude-haiku-4-5-20251001"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield mock
@@ -401,7 +401,7 @@ def mock_llm_stager():
     """Patch litellm.acompletion to return a stager response."""
     mock_resp = _make_mock_llm_response(MOCK_STAGER_RESPONSE)
     with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_resp) as mock:
-        with patch("laya.llm.client.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
+        with patch("laya.llm.model_resolution.load_settings", return_value={"models": {"stager": "claude-sonnet-4-5-20250929"}}):
             with patch("laya.pipeline.queue.get_model_timeout", return_value=120):
                 with patch("laya.pipeline.queue.get_llm_retries", return_value=1):
                     yield mock
