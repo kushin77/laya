@@ -105,3 +105,13 @@ class Platform(abc.ABC):
         """Short human phrase like ``"a professional email"``; name-dependent
         default, so platforms override with a plain ``platform_hint = "…"``."""
         return f"a {self.name} message"
+
+    async def validate_credentials(self, credentials: dict) -> tuple[bool, str | None]:
+        """Test credentials against the platform's API.
+
+        Returns ``(True, None)`` on success or ``(False, error_message)`` on
+        failure. Default is a no-op pass (matches the historical behavior for
+        platforms with nothing to test, e.g. OAuth-only platforms) — override
+        for platforms that can validate credentials with a test API call.
+        """
+        return True, None
