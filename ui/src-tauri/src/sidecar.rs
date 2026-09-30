@@ -28,21 +28,82 @@ pub fn engine_port() -> u16 {
         .unwrap_or(8420)
 }
 
-/// On Windows, attach CREATE_NO_WINDOW so spawned child processes do not
-/// flash a console window. No-op on other platforms.
-#[cfg(windows)]
-fn no_window(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
+// ── Engine health summary ───────────────────────────────────────────────
+
+/// Parsed contents of the engine's `/health` (and `/cards`) endpoints, as
+/// needed to render the tray tooltip.
+#[derive(Debug, Clone)]
+pub struct HealthSummary {
+    pub engine: String,
+    pub n8n: String,
+    pub pending: u64,
 }
 
-#[cfg(not(windows))]
-fn no_window(_cmd: &mut Command) {}
+impl HealthSummary {
+    pub fn tooltip(&self) -> String {
+        format!(
+            "Laya - Engine: {} | n8n: {} | {} pending",
+            self.engine, self.n8n, self.pending
+        )
+    }
+}
+
+/// Outcome of polling the engine's health endpoint for the tray tooltip.
+pub enum EngineHealthCheck {
+    Ready(HealthSummary),
+    /// `/health` responded but its body wasn't the expected JSON shape.
+    ParseError,
+    /// `/health` did not respond at all.
+    Offline,
+}
+
+impl EngineHealthCheck {
+    pub fn tooltip(&self) -> String {
+        match self {
+            EngineHealthCheck::Ready(summary) => summary.tooltip(),
+            EngineHealthCheck::ParseError => "Laya - Engine: error parsing health".to_string(),
+            EngineHealthCheck::Offline => "Laya - Engine offline".to_string(),
+        }
+    }
+}
+
+/// Poll `/health` (and, on success, `/cards?status=pending&limit=1`) and
+/// summarize the result for the tray tooltip. Pulled out of `lib.rs` so the
+/// tray-UI code only formats a string instead of hand-parsing the engine's
+/// response shape.
+pub fn engine_health_summary(client: &reqwest::blocking::Client) -> EngineHealthCheck {
+    let engine_base = engine_url();
+    match client.get(format!("{}/health", engine_base)).send() {
+        Ok(resp) => match resp.json::<serde_json::Value>() {
+            Ok(body) => {
+                let engine = body
+                    .get("engine")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let n8n = body
+                    .get("n8n")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let pending = client
+                    .get(format!("{}/cards?status=pending&limit=1", engine_base))
+                    .send()
+                    .ok()
+                    .and_then(|r| r.json::<serde_json::Value>().ok())
+                    .and_then(|b| b.get("total").and_then(|v| v.as_u64()))
+                    .unwrap_or(0);
+                EngineHealthCheck::Ready(HealthSummary { engine, n8n, pending })
+            }
+            Err(_) => EngineHealthCheck::ParseError,
+        },
+        Err(_) => EngineHealthCheck::Offline,
+    }
+}
 
 // ── Path helpers ────────────────────────────────────────────────────────
 
-use crate::process_util::laya_home;
+use crate::process_util::{laya_home, no_window};
 
 /// ~/.laya/venv
 fn venv_dir() -> PathBuf {
