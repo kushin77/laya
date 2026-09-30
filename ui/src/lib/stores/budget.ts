@@ -1,9 +1,9 @@
 // Copyright 2026 Aayush Chawla
 // SPDX-License-Identifier: Apache-2.0
 
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { engineApi } from '$lib/api/engine';
-import type { BudgetConfig, AgentBudgetStatus } from '$lib/api/types';
+import type { BudgetConfig, AgentBudgetStatus, MonthlyCostEntry } from '$lib/api/types';
 
 export const budgetPaused = writable(false);
 
@@ -69,6 +69,91 @@ export function loadBudgetStatus() {
 			// Engine not ready yet — ignore
 		}
 	}, 5000);
+}
+
+// ── Cost Control settings-panel state (ModelConfig's Cost Control section) ───
+// Distinct from `budgetData` above (footer widget's derived summary): this holds
+// the full editable form state for the settings page.
+
+export const budgetEnabled = writable(false);
+export const budgetLimit = writable<number | null>(null);
+export const budgetLimitInput = writable<number | null>(null);
+export const currentMonthCost = writable(0);
+export const currentMonth = writable('');
+export const budgetByModel = writable<Record<string, number>>({});
+export const budgetTokensByModel = writable<Record<string, number>>({});
+export const budgetIsPaused = writable(false);
+export const pausedWorkflowCount = writable(0);
+export const savingBudget = writable(false);
+export const resumingBudget = writable(false);
+export const budgetHistory = writable<MonthlyCostEntry[]>([]);
+export const historyLoading = writable(false);
+
+export async function loadBudget() {
+	try {
+		const data = await engineApi.getBudget();
+		budgetEnabled.set(data.enabled);
+		budgetLimit.set(data.monthly_limit_usd);
+		budgetLimitInput.set(data.monthly_limit_usd);
+		currentMonthCost.set(data.current_month_cost);
+		currentMonth.set(data.current_month);
+		budgetByModel.set(data.by_model);
+		budgetTokensByModel.set(data.tokens_by_model);
+		budgetIsPaused.set(data.is_paused);
+		pausedWorkflowCount.set(data.paused_workflow_count);
+		budgetPaused.set(data.is_paused);
+	} catch (e) {
+		console.error('Failed to load budget:', e);
+	}
+}
+
+export async function saveBudget() {
+	savingBudget.set(true);
+	try {
+		const input = get(budgetLimitInput);
+		const limit = input != null && input > 0 ? input : null;
+		await engineApi.updateBudget({ monthly_limit_usd: limit, enabled: get(budgetEnabled) });
+		budgetLimit.set(limit);
+		// Re-fetch to confirm server state
+		await loadBudget();
+		// Update the global budget store so the footer cost widget refreshes
+		loadBudgetStatus();
+	} catch (e) {
+		console.error('Failed to save budget:', e);
+	} finally {
+		savingBudget.set(false);
+	}
+}
+
+let _budgetSaveTimer: ReturnType<typeof setTimeout> | null = null;
+export function debounceSaveBudget() {
+	if (_budgetSaveTimer) clearTimeout(_budgetSaveTimer);
+	_budgetSaveTimer = setTimeout(saveBudget, 600);
+}
+
+export async function handleResume() {
+	resumingBudget.set(true);
+	try {
+		await engineApi.resumeBudget();
+		await loadBudget();
+	} catch (e) {
+		console.error('Failed to resume:', e);
+	} finally {
+		resumingBudget.set(false);
+	}
+}
+
+export async function loadHistory() {
+	if (get(budgetHistory).length > 0) return; // already loaded
+	historyLoading.set(true);
+	try {
+		const data = await engineApi.getBudgetHistory();
+		budgetHistory.set(data.months);
+	} catch (e) {
+		console.error('Failed to load budget history:', e);
+	} finally {
+		historyLoading.set(false);
+	}
 }
 
 export function handleBudgetWsMessage(msg: { type: string; paused?: boolean }) {
