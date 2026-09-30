@@ -5,17 +5,9 @@
 	import { page } from '$app/stores';
 	import {
 		chatOpen,
-		chatMessages,
-		chatInputPreset,
-		streamingMessageId,
-		chatSending,
-		activeTools,
-		activeConversationId,
-		conversations,
+		chatSession,
 		chatListOpen,
-		chatExpanded,
-		chatCardContext,
-		chatCardIds
+		chatExpanded
 	} from '$lib/stores/chat';
 	import { applyLoadedMessages } from '$lib/stores/chatStream';
 	import { wsStatus, sendMessage } from '$lib/stores/websocket';
@@ -50,7 +42,7 @@
 	// module-level chatStream handler — the old component-local `sending` flag
 	// stayed true forever when a stream never delivered its done-event, which
 	// silently blocked all further sends.
-	const chatBusy = $derived($chatSending || $streamingMessageId !== null);
+	const chatBusy = $derived($chatSession.sending || $chatSession.streamingMessageId !== null);
 
 	// The floating-card skin (margins + rounding + shadow) suits the padded pages, but on
 	// the workspace the surrounding panels are full-bleed — so that skin reads as a
@@ -102,14 +94,13 @@
 
 	// Apply preset message when triggered from a card
 	$effect(() => {
-		const preset = $chatInputPreset;
+		const preset = $chatSession.inputPreset;
 		if (preset) {
 			input = preset;
-			chatInputPreset.set('');
+			chatSession.update((s) => ({ ...s, inputPreset: '' }));
 			// If showing list, switch to chat view (will auto-create conversation on send)
 			if ($chatListOpen) {
-				activeConversationId.set(null);
-				chatMessages.set([]);
+				chatSession.update((s) => ({ ...s, activeConversationId: null, messages: [] }));
 				chatListOpen.set(false);
 			}
 			// Wait for the textarea to render, then resize to fit the preset text
@@ -117,11 +108,11 @@
 		}
 	});
 
-	const inCardMode = $derived(!!$chatCardIds && $chatCardIds.length > 0);
+	const inCardMode = $derived(!!$chatSession.cardIds && $chatSession.cardIds.length > 0);
 
 	// When card context is set and drawer opens, restore or start a card-anchored conversation
 	$effect(() => {
-		const cardIds = $chatCardIds;
+		const cardIds = $chatSession.cardIds;
 		if (!cardIds || cardIds.length === 0 || !$chatOpen) return;
 		chatListOpen.set(false);
 
@@ -129,17 +120,15 @@
 			try {
 				const conv = await engineApi.getConversationByCards(cardIds);
 				if (conv) {
-					activeConversationId.set(conv.conversation_id);
+					chatSession.update((s) => ({ ...s, activeConversationId: conv.conversation_id }));
 					const msgs = await engineApi.getConversationMessages(conv.conversation_id, 100);
 					// Merge-aware: don't clobber an in-flight streaming reply
 					applyLoadedMessages(conv.conversation_id, [...msgs].reverse());
 				} else {
-					activeConversationId.set(null);
-					chatMessages.set([]);
+					chatSession.update((s) => ({ ...s, activeConversationId: null, messages: [] }));
 				}
 			} catch {
-				activeConversationId.set(null);
-				chatMessages.set([]);
+				chatSession.update((s) => ({ ...s, activeConversationId: null, messages: [] }));
 			}
 		})();
 	});
@@ -172,7 +161,7 @@
 	// scrolled up to read earlier content. This lets streamed content flow
 	// naturally without hijacking the scroll when the user is reading.
 	$effect(() => {
-		if ($chatMessages.length > 0 && pinnedToBottom) {
+		if ($chatSession.messages.length > 0 && pinnedToBottom) {
 			setTimeout(scrollToBottom, 0);
 		}
 	});
@@ -180,7 +169,7 @@
 	// Re-pin to bottom when switching conversations so the new thread opens
 	// at its latest message instead of inheriting the previous scroll state.
 	$effect(() => {
-		$activeConversationId;
+		$chatSession.activeConversationId;
 		pinnedToBottom = true;
 	});
 
@@ -193,7 +182,7 @@
 		const text = input.trim();
 		if (!text || chatBusy) return;
 
-		const convId = get(activeConversationId);
+		const convId = get(chatSession).activeConversationId;
 
 		const userMsg: ChatMessageType = {
 			message_id: `tmp-${Date.now()}`,
@@ -204,9 +193,8 @@
 			referenced_events: [],
 			conversation_id: convId ?? undefined
 		};
-		chatMessages.update((msgs) => [...msgs, userMsg]);
+		chatSession.update((s) => ({ ...s, messages: [...s.messages, userMsg], sending: true }));
 		input = '';
-		chatSending.set(true);
 		pinnedToBottom = true;
 
 		// Try WS first, fallback to REST
@@ -214,14 +202,16 @@
 		const unsub = wsStatus.subscribe((s) => (wsConnected = s === 'connected'));
 		unsub();
 
+		const { cardContext, cardIds } = get(chatSession);
+
 		if (wsConnected) {
 			sendMessage({
 				type: 'chat_message',
 				payload: {
 					message: text,
 					conversation_id: convId,
-					...(get(chatCardContext) ? { card_context: get(chatCardContext) } : {}),
-					...(get(chatCardIds)?.length ? { card_ids: get(chatCardIds) } : {})
+					...(cardContext ? { card_context: cardContext } : {}),
+					...(cardIds?.length ? { card_ids: cardIds } : {})
 				}
 			});
 		} else {
@@ -229,14 +219,16 @@
 				const resp = await engineApi.sendChat(
 					text,
 					convId ?? undefined,
-					get(chatCardContext) ?? undefined,
-					get(chatCardIds) ?? undefined
+					cardContext ?? undefined,
+					cardIds ?? undefined
 				);
-				chatMessages.update((msgs) => [...msgs, resp.message]);
-				// Track auto-created conversation
-				if (resp.message.conversation_id && !convId) {
-					activeConversationId.set(resp.message.conversation_id);
-				}
+				chatSession.update((s) => {
+					const activeConversationId =
+						resp.message.conversation_id && !convId
+							? resp.message.conversation_id
+							: s.activeConversationId;
+					return { ...s, messages: [...s.messages, resp.message], activeConversationId };
+				});
 			} catch {
 				const errMsg: ChatMessageType = {
 					message_id: `err-${Date.now()}`,
@@ -246,9 +238,9 @@
 					referenced_cards: [],
 					referenced_events: []
 				};
-				chatMessages.update((msgs) => [...msgs, errMsg]);
+				chatSession.update((s) => ({ ...s, messages: [...s.messages, errMsg] }));
 			} finally {
-				chatSending.set(false);
+				chatSession.update((s) => ({ ...s, sending: false }));
 			}
 		}
 	}
@@ -261,29 +253,29 @@
 	}
 
 	function goBackToList() {
-		chatCardContext.set(null);
-		chatCardIds.set(null);
+		chatSession.update((s) => ({ ...s, cardContext: null, cardIds: null }));
 		chatListOpen.set(true);
 	}
 
 	function handleClose() {
 		chatOpen.set(false);
-		chatCardContext.set(null);
-		chatCardIds.set(null);
+		chatSession.update((s) => ({ ...s, cardContext: null, cardIds: null }));
 	}
 
 	function clearChat() {
 		if (clearPending) {
 			// Second click — confirm
-			const convId = get(activeConversationId);
+			const convId = get(chatSession).activeConversationId;
 			if (convId) {
 				engineApi.deleteConversation(convId).catch(() => {});
-				conversations.update((list) => list.filter((c) => c.conversation_id !== convId));
+				chatSession.update((s) => ({
+					...s,
+					conversations: s.conversations.filter((c) => c.conversation_id !== convId)
+				}));
 			}
-			activeConversationId.set(null);
-			chatMessages.set([]);
+			chatSession.update((s) => ({ ...s, activeConversationId: null, messages: [] }));
 			clearPending = false;
-			if (!get(chatCardIds)?.length) {
+			if (!get(chatSession).cardIds?.length) {
 				chatListOpen.set(true);
 			}
 		} else {
@@ -293,14 +285,14 @@
 	}
 
 	function conversationTitle(): string {
-		const convId = $activeConversationId;
+		const convId = $chatSession.activeConversationId;
 		if (!convId) return 'New Chat';
-		const conv = $conversations.find((c) => c.conversation_id === convId);
+		const conv = $chatSession.conversations.find((c) => c.conversation_id === convId);
 		return conv?.title ?? 'Chat';
 	}
 
 	function startRename() {
-		const convId = get(activeConversationId);
+		const convId = get(chatSession).activeConversationId;
 		if (!convId) return;
 		renameValue = conversationTitle();
 		renaming = true;
@@ -316,7 +308,7 @@
 
 	async function commitRename() {
 		if (!renaming) return;
-		const convId = get(activeConversationId);
+		const convId = get(chatSession).activeConversationId;
 		renaming = false;
 		if (!convId) return;
 
@@ -324,21 +316,27 @@
 		if (!trimmed) return;
 
 		let prior = '';
-		conversations.update((list) => {
-			const found = list.find((c) => c.conversation_id === convId);
+		chatSession.update((s) => {
+			const found = s.conversations.find((c) => c.conversation_id === convId);
 			prior = found?.title ?? '';
-			return list.map((c) =>
-				c.conversation_id === convId ? { ...c, title: trimmed } : c
-			);
+			return {
+				...s,
+				conversations: s.conversations.map((c) =>
+					c.conversation_id === convId ? { ...c, title: trimmed } : c
+				)
+			};
 		});
 		if (prior === trimmed) return;
 
 		try {
 			await engineApi.renameConversation(convId, trimmed);
 		} catch {
-			conversations.update((list) =>
-				list.map((c) => (c.conversation_id === convId ? { ...c, title: prior } : c))
-			);
+			chatSession.update((s) => ({
+				...s,
+				conversations: s.conversations.map((c) =>
+					c.conversation_id === convId ? { ...c, title: prior } : c
+				)
+			}));
 		}
 	}
 
@@ -399,7 +397,7 @@
 					</button>
 					{#if inCardMode}
 						<h3 class="truncate text-laya-base font-semibold">
-							{$chatCardIds?.length === 1 ? 'Chat about this card' : `Chat about ${$chatCardIds?.length} cards`}
+							{$chatSession.cardIds?.length === 1 ? 'Chat about this card' : `Chat about ${$chatSession.cardIds?.length} cards`}
 						</h3>
 					{:else if renaming}
 						<input
@@ -415,12 +413,12 @@
 						<button
 							type="button"
 							onclick={startRename}
-							disabled={!$activeConversationId}
+							disabled={!$chatSession.activeConversationId}
 							class="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors {$glassTheme ? 'enabled:hover:bg-white/[0.05]' : 'enabled:hover:bg-surface-800'} disabled:cursor-default"
-							title={$activeConversationId ? 'Rename conversation' : ''}
+							title={$chatSession.activeConversationId ? 'Rename conversation' : ''}
 						>
 							<h3 class="truncate text-laya-base font-semibold">{conversationTitle()}</h3>
-							{#if $activeConversationId}
+							{#if $chatSession.activeConversationId}
 								<svg
 									class="h-3 w-3 shrink-0 text-surface-500 opacity-0 transition-opacity group-hover:opacity-100"
 									fill="none"
@@ -434,7 +432,7 @@
 					{/if}
 				</div>
 				<div class="flex items-center gap-1">
-					{#if $activeConversationId || inCardMode}
+					{#if $chatSession.activeConversationId || inCardMode}
 						<div class="group/clr relative">
 							<button
 								onclick={clearChat}
@@ -488,32 +486,32 @@
 
 			<!-- Messages -->
 			<div bind:this={messagesEl} onscroll={handleMessagesScroll} class="flex-1 space-y-3 overflow-auto p-4">
-				{#if $chatMessages.length === 0}
+				{#if $chatSession.messages.length === 0}
 					<p class="text-center text-laya-base text-surface-500">
 						{#if inCardMode}
-							Ask anything about {$chatCardIds?.length === 1 ? 'this card' : `these ${$chatCardIds?.length} cards`}. Laya has full context of their intelligence, outputs, and metadata.
+							Ask anything about {$chatSession.cardIds?.length === 1 ? 'this card' : `these ${$chatSession.cardIds?.length} cards`}. Laya has full context of their intelligence, outputs, and metadata.
 						{:else}
 							Ask Laya about your events, cards, or recent activity.
 						{/if}
 					</p>
 				{:else}
-					{#each $chatMessages as msg (msg.message_id)}
-						<ChatMessage message={msg} streaming={msg.message_id === $streamingMessageId} />
+					{#each $chatSession.messages as msg (msg.message_id)}
+						<ChatMessage message={msg} streaming={msg.message_id === $chatSession.streamingMessageId} />
 					{/each}
 				{/if}
 
 				<!-- Tool calling indicator -->
-				{#if $activeTools.length > 0}
+				{#if $chatSession.activeTools.length > 0}
 					<div class="flex justify-start">
 						<div class="rounded-xl {$glassTheme ? 'bg-white/[0.05] ring-1 ring-white/[0.08]' : 'bg-surface-800 ring-1 ring-surface-600'} px-3.5 py-2 text-laya-secondary text-surface-400">
 							<span class="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-laya-orange"></span>
-							Looking up: {$activeTools.join(', ')}
+							Looking up: {$chatSession.activeTools.join(', ')}
 						</div>
 					</div>
 				{/if}
 
 				<!-- Waiting indicator (before stream starts) -->
-				{#if $chatSending && !$streamingMessageId && $activeTools.length === 0}
+				{#if $chatSession.sending && !$chatSession.streamingMessageId && $chatSession.activeTools.length === 0}
 					<div class="flex justify-start">
 						<div class="rounded-xl {$glassTheme ? 'bg-white/[0.06]' : 'bg-surface-700'} px-3.5 py-2.5 text-laya-base text-surface-400">
 							<span class="inline-flex gap-1">
