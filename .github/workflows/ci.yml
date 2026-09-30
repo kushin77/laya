@@ -74,6 +74,13 @@ jobs:
       - name: Install deps
         working-directory: ui
         run: npm ci
+      # eslint was only just bootstrapped for this project (see fork issue #27)
+      # and the codebase has never been linted, so this starts informational —
+      # tighten to blocking once a baseline is established.
+      - name: Lint (eslint)
+        working-directory: ui
+        run: npm run lint
+        continue-on-error: true
       - name: Typecheck (svelte-check)
         working-directory: ui
         run: npm run check
