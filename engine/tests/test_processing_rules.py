@@ -36,6 +36,9 @@ from laya.pipeline.processing_rules import (
     evaluate_condition,
     run_processing_rules,
 )
+# _exec_run_agent/_execute_action/_resolve_template are re-exported by
+# processing_rules for compatibility; publish() is called from within
+# processing_actions.py, so patches must target that module.
 from tests.conftest import insert_test_card, insert_test_event
 
 
@@ -532,7 +535,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_st2", "evt_st2", status="pending")
         action = SetStatusAction(status="archived")
 
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_st2", None, None, {})
 
         assert result["success"] is True
@@ -543,7 +546,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_st3", "evt_st3", status="pending")
         action = SetStatusAction(status="done")
 
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_st3", None, None, {})
 
         assert result["success"] is True
@@ -554,7 +557,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_pr1", "evt_pr1", priority="MEDIUM")
         action = SetPriorityAction(priority="CRITICAL")
 
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock) as mock_bc:
             result = await _execute_action(action, "card_pr1", None, None, {})
 
         assert result["success"] is True
@@ -567,7 +570,7 @@ class TestActionExecutors:
         await insert_test_card(db, "card_bk1", "evt_bk1")
         action = BookmarkAction()
 
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock):
             result = await _execute_action(action, "card_bk1", None, None, {})
 
         assert result["success"] is True
@@ -583,7 +586,7 @@ class TestActionExecutors:
         await db.commit()
 
         action = BookmarkAction()
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock):
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock):
             await _execute_action(action, "card_bk2", None, None, {})
 
         rows = await db.execute_fetchall("SELECT bookmarked_at FROM action_cards WHERE card_id = ?", ("card_bk2",))
@@ -597,7 +600,7 @@ class TestActionExecutors:
             body_template="Check it out",
         )
 
-        with patch("laya.pipeline.processing_rules.publish", new_callable=AsyncMock) as mock_bc:
+        with patch("laya.pipeline.processing_actions.publish", new_callable=AsyncMock) as mock_bc:
             result = await _execute_action(action, "card_notif", None, None, context)
 
         assert result["success"] is True
@@ -932,7 +935,7 @@ async def agent_env(db):
         p(patch("laya.config.load_repos", new=MagicMock(return_value={"repos": []})))
         p(patch("laya.api.cards_api._stream_entity_agent", new=MagicMock()))
         p(patch("laya.tasks.create_task", new=MagicMock()))
-        p(patch("laya.pipeline.processing_rules.publish", new=AsyncMock()))
+        p(patch("laya.pipeline.processing_actions.publish", new=AsyncMock()))
         yield mocks
 
 
