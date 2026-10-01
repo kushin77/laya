@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate
+
 from laya.models.classification import RouterOutput
 from laya.pipeline.router import _store_entities, run_router
 from tests.conftest import MOCK_COMMS_RESPONSE, MOCK_ROUTER_RESPONSE, insert_test_event
@@ -273,7 +275,7 @@ async def test_batch_router_matches_by_event_index(db, sample_event):
     mock_resp = MagicMock()
     mock_resp.parsed = {"classifications": [cls_b, cls_a]}
 
-    with patch("laya.pipeline.router.llm_call", new_callable=AsyncMock, return_value=mock_resp), \
+    with patch_llm_generate(return_value=mock_resp), \
          patch("laya.pipeline.feedback.query_classification_rules", new_callable=AsyncMock, return_value=[]), \
          patch("laya.pipeline.feedback.query_classification_corrections", new_callable=AsyncMock, return_value=[]):
         results = await run_batch_router(events_data)
@@ -303,7 +305,7 @@ async def test_batch_router_drops_bad_index(db, sample_event):
     mock_resp = MagicMock()
     mock_resp.parsed = {"classifications": [good, bad]}
 
-    with patch("laya.pipeline.router.llm_call", new_callable=AsyncMock, return_value=mock_resp), \
+    with patch_llm_generate(return_value=mock_resp), \
          patch("laya.pipeline.feedback.query_classification_rules", new_callable=AsyncMock, return_value=[]), \
          patch("laya.pipeline.feedback.query_classification_corrections", new_callable=AsyncMock, return_value=[]):
         results = await run_batch_router(events_data)

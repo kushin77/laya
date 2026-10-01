@@ -12,6 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from tests.conftest import insert_test_card
+from tests.llm_client_fixtures import patch_llm_generate
 
 
 @pytest.mark.asyncio
@@ -101,8 +102,7 @@ class TestResynthesisFailureRetry:
 
         await self._seed_cards(db, count=3)
 
-        with patch.object(
-            omni_pipeline, "llm_call", new=AsyncMock(side_effect=RuntimeError("LLM down"))
+        with patch_llm_generate(new=AsyncMock(side_effect=RuntimeError("LLM down"))
         ):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50
@@ -117,8 +117,7 @@ class TestResynthesisFailureRetry:
         # Batch 1: 3 cards, LLM fails.
         await self._seed_cards(db, count=3, prefix="batch1")
 
-        with patch.object(
-            omni_pipeline, "llm_call", new=AsyncMock(side_effect=RuntimeError("LLM down"))
+        with patch_llm_generate(new=AsyncMock(side_effect=RuntimeError("LLM down"))
         ):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50
@@ -150,7 +149,7 @@ class TestResynthesisFailureRetry:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm_call):
+        with patch_llm_generate(new=fake_llm_call):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50
             )
@@ -204,7 +203,7 @@ class TestFetchCapMath:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm_call):
+        with patch_llm_generate(new=fake_llm_call):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50
             )
@@ -248,7 +247,7 @@ class TestFetchCapMath:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm_call):
+        with patch_llm_generate(new=fake_llm_call):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=0
             )
@@ -362,7 +361,7 @@ class TestResolutionDrop:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm_call):
+        with patch_llm_generate(new=fake_llm_call):
             sid = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -413,7 +412,7 @@ class TestResolutionDrop:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm_call):
+        with patch_llm_generate(new=fake_llm_call):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -473,7 +472,7 @@ class TestResynthesisChunking:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -509,7 +508,7 @@ class TestResynthesisChunking:
             return R()
 
         with patch.object(omni_pipeline, "build_omni_resynthesis_messages", new=spy_build), \
-             patch.object(omni_pipeline, "llm_call", new=fake_llm):
+             patch_llm_generate(new=fake_llm):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -581,7 +580,7 @@ class TestResynthesisChunking:
             return R()
 
         with patch.object(omni_pipeline, "build_omni_resynthesis_messages", new=spy_build), \
-             patch.object(omni_pipeline, "llm_call", new=fake_llm):
+             patch_llm_generate(new=fake_llm):
             await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -609,7 +608,7 @@ class TestResynthesisChunking:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -707,7 +706,7 @@ class TestDegenerateSnapshotGuard:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -753,7 +752,7 @@ class TestDegenerateSnapshotGuard:
             return R()
 
         with patch.object(omni_pipeline, "build_omni_resynthesis_messages", new=spy_build), \
-             patch.object(omni_pipeline, "llm_call", new=fake_llm):
+             patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -827,7 +826,7 @@ class TestEmptyResultGuard:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -871,7 +870,7 @@ class TestEmptyResultGuard:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 
@@ -920,7 +919,7 @@ class TestEmptyResultGuard:
                 model = "test"
             return R()
 
-        with patch.object(omni_pipeline, "llm_call", new=fake_llm):
+        with patch_llm_generate(new=fake_llm):
             result = await omni_pipeline._resynthesize_space(
                 db, "default", density="compact", snapshot_type="manual", event_threshold=50)
 

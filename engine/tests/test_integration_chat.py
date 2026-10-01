@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate, patch_llm_stream
+
 from laya.pipeline.chat import process_chat_message
 from tests.conftest import insert_test_event, insert_test_card
 
@@ -44,7 +46,7 @@ class TestChatIntegration:
             "The NPE bug is tracked in [card:card_chat_int]. It's a high priority issue."
         )
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp):
+        with patch_llm_generate(return_value=mock_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result = await process_chat_message("What about the NPE bug?")
 
@@ -57,14 +59,14 @@ class TestChatIntegration:
         mock_resp2 = _mock_llm_response("Second response.")
 
         # First message creates a conversation
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp1):
+        with patch_llm_generate(return_value=mock_resp1):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result1 = await process_chat_message("Hello")
 
         conv_id = result1.message.conversation_id
 
         # Second message in the same conversation
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp2):
+        with patch_llm_generate(return_value=mock_resp2):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 await process_chat_message("How are you?", conversation_id=conv_id)
 
@@ -81,7 +83,7 @@ class TestChatIntegration:
             "I don't have any cards or events to discuss yet."
         )
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp):
+        with patch_llm_generate(return_value=mock_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result = await process_chat_message("What's going on?")
 
@@ -93,7 +95,7 @@ class TestChatIntegration:
         async def _fail(**kwargs):
             raise Exception("LLM connection failed")
 
-        with patch("laya.pipeline.chat.llm_call", side_effect=_fail):
+        with patch_llm_generate(side_effect=_fail):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result = await process_chat_message("Hello")
 
@@ -105,7 +107,7 @@ class TestChatIntegration:
 
         # Suppress title generation so we can deterministically observe the
         # placeholder title that the pipeline seeds on creation.
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp):
+        with patch_llm_generate(return_value=mock_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 with patch("laya.pipeline.chat._should_generate_title", new_callable=AsyncMock, return_value=False):
                     result = await process_chat_message("Hi")
@@ -127,7 +129,7 @@ class TestChatIntegration:
 
         mock_resp = _mock_llm_response("Debugging Auth Flow")
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp):
+        with patch_llm_generate(return_value=mock_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result = await process_chat_message("Why is auth failing?")
 
@@ -150,7 +152,7 @@ class TestChatIntegration:
         first_resp = _mock_llm_response("First answer")
         second_resp = _mock_llm_response("Should Not Overwrite")
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=first_resp):
+        with patch_llm_generate(return_value=first_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 with patch("laya.pipeline.chat._should_generate_title", new_callable=AsyncMock, return_value=False):
                     first = await process_chat_message("Initial message")
@@ -162,7 +164,7 @@ class TestChatIntegration:
         )
         await db.commit()
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=second_resp):
+        with patch_llm_generate(return_value=second_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 await process_chat_message(
                     "Follow-up", conversation_id=first.message.conversation_id
@@ -182,7 +184,7 @@ class TestChatIntegration:
         """Chat message with space_id is stored correctly."""
         mock_resp = _mock_llm_response("Space-scoped response.")
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock, return_value=mock_resp):
+        with patch_llm_generate(return_value=mock_resp):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 result = await process_chat_message(
                     "Hello", space_id="default"

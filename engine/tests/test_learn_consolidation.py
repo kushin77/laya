@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate
+
 from laya.pipeline.learn import (
     maybe_consolidate_classification_rules,
     run_learn_extraction,
@@ -51,7 +53,7 @@ class TestClassificationRuleConsolidation:
     async def test_below_threshold_is_noop(self, db):
         await _insert_rule(db, "priority", "only one")
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=5), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock) as mock_llm:
+             patch_llm_generate() as mock_llm:
             result = await maybe_consolidate_classification_rules(SPACE)
         assert result == 0
         mock_llm.assert_not_called()
@@ -65,7 +67,7 @@ class TestClassificationRuleConsolidation:
 
         merged = [("priority", "PR-ish things are LOW"), ("persona", "external -> COMMS")]
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock, return_value=_llm(merged)):
+             patch_llm_generate(return_value=_llm(merged)):
             result = await maybe_consolidate_classification_rules(SPACE)
 
         assert result == 2
@@ -79,7 +81,7 @@ class TestClassificationRuleConsolidation:
             await _insert_rule(db, "priority", f"r{i}")
         same = [("priority", f"r{i}") for i in range(3)]
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock, return_value=_llm(same)):
+             patch_llm_generate(return_value=_llm(same)):
             result = await maybe_consolidate_classification_rules(SPACE)
         assert result == 0
         assert len(await _rules(db, "learned")) == 3  # originals intact
@@ -88,7 +90,7 @@ class TestClassificationRuleConsolidation:
         for i in range(3):
             await _insert_rule(db, "persona", f"r{i}")
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock, return_value=_llm([])):
+             patch_llm_generate(return_value=_llm([])):
             result = await maybe_consolidate_classification_rules(SPACE)
         assert result == 0
         assert len(await _rules(db, "learned")) == 3
@@ -99,8 +101,7 @@ class TestClassificationRuleConsolidation:
         await _insert_rule(db, "priority", "other space rule", space_id="s2")
 
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock,
-                   return_value=_llm([("priority", "merged")])):
+             patch_llm_generate(return_value=_llm([("priority", "merged")])):
             result = await maybe_consolidate_classification_rules("s1")
 
         assert result == 1
@@ -117,7 +118,7 @@ class TestClassificationRuleConsolidation:
             {"field": "nonsense", "rule_text": "bad", "reasoning": "x"},
         ]}
         with patch("laya.pipeline.learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock, return_value=resp):
+             patch_llm_generate(return_value=resp):
             result = await maybe_consolidate_classification_rules(SPACE)
         assert result == 1
         assert await _rules(db, "learned") == [("priority", "good")]
@@ -150,7 +151,7 @@ class TestRunLearnExtraction:
         ]}
         learner.content = ""
         # Consolidation runs after but stays below the default threshold (40).
-        with patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock, return_value=learner):
+        with patch_llm_generate(return_value=learner):
             created = await run_learn_extraction(SPACE)
 
         assert created == 1
@@ -162,7 +163,7 @@ class TestRunLearnExtraction:
         assert rows[0]["n"] == 0
 
     async def test_no_corrections_is_noop(self, db):
-        with patch("laya.pipeline.learn.llm_call", new_callable=AsyncMock) as mock_llm:
+        with patch_llm_generate() as mock_llm:
             created = await run_learn_extraction(SPACE)
         assert created == 0
         mock_llm.assert_not_called()

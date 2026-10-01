@@ -10,7 +10,8 @@ import structlog
 
 from laya.db.chromadb_store import memory_search
 from laya.db.sqlite import get_db
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 
 log = structlog.get_logger()
 
@@ -283,7 +284,7 @@ async def confirm_context_link(
     }
 
     try:
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="router",  # cheap model
             messages=messages,
             response_schema=schema,

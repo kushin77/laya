@@ -13,7 +13,7 @@ from laya.events import publish
 from laya.config import get_debounce_config
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
-from laya.llm.client import llm_call
+from laya.llm.base import get_llm_client
 from laya.llm.prompts.summarizer import (
     build_batch_summarizer_messages,
     build_summarizer_messages,
@@ -248,7 +248,7 @@ async def _fold_batch(
     logging, so a representative id (the chunk's first) is fine.
     """
     messages = build_batch_summarizer_messages(current_summary=current_summary, new_cards=chunk)
-    response = await llm_call(
+    response = await get_llm_client().generate(
         role="stager",
         messages=messages,
         response_schema=schema,
@@ -295,7 +295,7 @@ async def _fold_cards_sequentially(
             card_tags=card.get("card_tags"),
         )
         try:
-            response = await llm_call(
+            response = await get_llm_client().generate(
                 role="stager",
                 messages=messages,
                 response_schema=schema,

@@ -14,7 +14,8 @@ from laya.config import load_settings
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_ts
 from laya.tz import safe_zoneinfo
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.briefing import build_briefing_messages
 from laya.models.card import ActionCardData, StagedOutput, SuggestedAction
 from laya.models.classification import RouterOutput
@@ -158,7 +159,7 @@ async def generate_briefing(space_id: str | None = None) -> str:
     )
 
     try:
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="stager",
             messages=messages,
             step="briefing",

@@ -20,7 +20,8 @@ import structlog
 from laya.config import load_settings
 from laya.db.timeutil import db_now
 from laya.events import publish
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.models.card_lifecycle import TERMINAL_STATUSES as _TERMINAL_STATUSES
 from laya.llm.prompts.omni import (
     build_omni_resynthesis_messages,
@@ -380,7 +381,7 @@ async def _resynthesize_space(
                 item_states=item_states if first else [],
                 resolved_cards=resolved_cards if first else [],
             )
-            response = await llm_call(
+            response = await get_llm_client().generate(
                 role="omni",
                 messages=messages,
                 response_schema=schema,

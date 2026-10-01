@@ -10,7 +10,8 @@ import structlog
 
 from laya.db.sqlite import get_db
 from laya.pipeline.related_context import query_related_context
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.router import (
     build_batch_router_messages,
     build_router_messages,
@@ -102,7 +103,7 @@ async def run_router(
     )
     schema = get_router_json_schema()
 
-    response = await llm_call(
+    response = await get_llm_client().generate(
         role="router",
         messages=messages,
         response_schema=schema,
@@ -211,7 +212,7 @@ async def run_batch_router(
     messages = build_batch_router_messages(events_data, feedback_context=feedback_section)
     schema = get_batch_router_json_schema(len(events_data))
 
-    response = await llm_call(
+    response = await get_llm_client().generate(
         role="router",
         messages=messages,
         response_schema=schema,

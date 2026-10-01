@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate
+
 from laya.models.card import ActionCardData, StagedOutput
 from laya.pipeline.stager import run_stager
 
@@ -50,7 +52,7 @@ class TestStager:
         event instead of swallowing it into a degraded fallback card with the
         event marked completed (review §2 pipeline — P3-5)."""
         with patch("laya.pipeline.related_context.memory_search", new_callable=AsyncMock, return_value=[]):
-            with patch("laya.pipeline.stager.llm_call", new_callable=AsyncMock, side_effect=Exception("LLM timeout")):
+            with patch_llm_generate(side_effect=Exception("LLM timeout")):
                 with pytest.raises(Exception, match="LLM timeout"):
                     await run_stager(sample_event, sample_router_output_engineer)
 
@@ -63,7 +65,7 @@ class TestStager:
         bad.parsed = None
         bad.content = "this is not json"
         with patch("laya.pipeline.related_context.memory_search", new_callable=AsyncMock, return_value=[]):
-            with patch("laya.pipeline.stager.llm_call", new_callable=AsyncMock, return_value=bad):
+            with patch_llm_generate(return_value=bad):
                 result = await run_stager(sample_event, sample_router_output_engineer)
 
         assert isinstance(result, ActionCardData)

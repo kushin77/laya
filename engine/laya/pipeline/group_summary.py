@@ -13,7 +13,8 @@ import structlog
 from laya.events import publish
 from laya.config import get_debounce_config, load_settings
 from laya.db.sqlite import get_db
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.group_summary import (
     GROUP_SUMMARY_JSON_SCHEMA,
     build_context_summary_messages,
@@ -216,7 +217,7 @@ async def _initial_generation(
     resolved_space_id = space_id or cards[0].get("space_id") or "default"
 
     messages = build_initial_messages(cards, entity_id)
-    resp = await llm_call(
+    resp = await get_llm_client().generate(
         role="group_summary",
         messages=messages,
         response_schema=GROUP_SUMMARY_JSON_SCHEMA,
@@ -325,7 +326,7 @@ async def _rolling_update(
     resolved_space_id = space_id or existing_row.get("space_id") or "default"
 
     messages = build_rolling_messages(existing_summary, new_cards, entity_id)
-    resp = await llm_call(
+    resp = await get_llm_client().generate(
         role="group_summary",
         messages=messages,
         response_schema=GROUP_SUMMARY_JSON_SCHEMA,
@@ -487,7 +488,7 @@ async def _generate_context_summary(
     resolved_space_id = space_id or "default"
 
     messages = build_context_summary_messages(entity_summaries, fallback_cards, context_label)
-    resp = await llm_call(
+    resp = await get_llm_client().generate(
         role="group_summary",
         messages=messages,
         response_schema=GROUP_SUMMARY_JSON_SCHEMA,
