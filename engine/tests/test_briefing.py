@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate
+
 from laya.llm.client import LLMResponse
 from laya.pipeline.briefing import generate_briefing, _build_fallback_briefing
 from tests.conftest import insert_test_card, insert_test_event
@@ -33,8 +35,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       return_value=_mock_briefing_response()):
+            with patch_llm_generate(return_value=_mock_briefing_response()):
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
@@ -59,8 +60,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       return_value=_mock_briefing_response()) as mock_llm:
+            with patch_llm_generate(return_value=_mock_briefing_response()) as mock_llm:
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
@@ -80,8 +80,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       return_value=_mock_briefing_response()):
+            with patch_llm_generate(return_value=_mock_briefing_response()):
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
@@ -95,8 +94,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       return_value=_mock_briefing_response()):
+            with patch_llm_generate(return_value=_mock_briefing_response()):
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         await generate_briefing()
@@ -118,8 +116,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       side_effect=Exception("LLM down")):
+            with patch_llm_generate(side_effect=Exception("LLM down")):
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id = await generate_briefing()
@@ -138,8 +135,7 @@ class TestBriefingPipeline:
             "models": {"stager": "claude-sonnet-4-5-20250929"},
         }
         with patch("laya.pipeline.briefing.load_settings", return_value=mock_settings):
-            with patch("laya.pipeline.briefing.llm_call", new_callable=AsyncMock,
-                       return_value=_mock_briefing_response()):
+            with patch_llm_generate(return_value=_mock_briefing_response()):
                 with patch("laya.pipeline.briefing.publish", new_callable=AsyncMock) as mock_mgr:
                     with patch("laya.pipeline.emit.trigger_summary_update", new_callable=AsyncMock):
                         card_id_1 = await generate_briefing()

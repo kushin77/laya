@@ -10,7 +10,8 @@ import structlog
 from laya.config import load_settings
 from laya.pipeline.related_context import query_related_context
 from laya.db.sqlite import get_db
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.stager import build_stager_messages, get_stager_json_schema
 from laya.models.card import ActionCardData, StagedOutput, SuggestedAction
 from laya.models.classification import RouterOutput
@@ -93,7 +94,7 @@ async def run_stager(
     # 30-second LMStudio restart mid-request) was swallowed into a degraded
     # fallback card and the event was marked completed — the fallback is now
     # reserved for genuine PARSE failures below (review §2 pipeline).
-    response = await llm_call(
+    response = await get_llm_client().generate(
         role="stager",
         messages=messages,
         response_schema=schema,

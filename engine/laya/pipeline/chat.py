@@ -19,7 +19,8 @@ from laya.db.chromadb_store import memory_search
 from laya.db.sqlite import get_db
 from laya.retrieval import extract_keywords, fts_or_like, reciprocal_rank_fusion
 from laya.db.timeutil import db_now
-from laya.llm.client import llm_call, llm_call_streaming, StreamEvent
+from laya.llm.base import get_llm_client
+from laya.llm.client import StreamEvent
 from laya.llm.prompts.chat import build_chat_messages, build_title_generation_messages
 from laya.llm.tools.definitions import select_chat_tools
 from laya.llm.tools.executor import execute_tool
@@ -192,7 +193,7 @@ async def _generate_title_background(
     """
     try:
         messages = build_title_generation_messages(user_message)
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="router",
             messages=messages,
             step="chat_title",
@@ -201,7 +202,7 @@ async def _generate_title_background(
             space_id=space_id,
         )
         if response.finish_reason == "length":
-            response = await llm_call(
+            response = await get_llm_client().generate(
                 role="router",
                 messages=messages,
                 step="chat_title",
@@ -333,7 +334,7 @@ async def process_chat_message(
 
     try:
         for iteration in range(MAX_TOOL_ITERATIONS + 1):
-            response = await llm_call(
+            response = await get_llm_client().generate(
                 role="chat",
                 messages=messages,
                 step="chat",
@@ -642,7 +643,7 @@ async def process_chat_message_streaming(
                 use_tools = tools if iteration < MAX_TOOL_ITERATIONS else None
                 had_tool_calls = False
 
-                async for event in llm_call_streaming(
+                async for event in get_llm_client().stream(
                     role="chat",
                     messages=messages,
                     step="chat",

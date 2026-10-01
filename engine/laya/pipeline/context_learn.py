@@ -11,7 +11,8 @@ import structlog
 
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.context_learner import (
     build_context_learner_messages,
     get_context_learner_json_schema,
@@ -80,7 +81,7 @@ async def run_context_learn_extraction(space_id: str | None) -> int:
     schema = get_context_learner_json_schema()
 
     try:
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="router",  # cheap model
             messages=messages,
             response_schema=schema,
@@ -191,7 +192,7 @@ async def maybe_consolidate_context_rules(space_id: str | None) -> int:
     schema = get_context_rule_consolidator_json_schema()
 
     try:
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="router",  # cheap model
             messages=messages,
             response_schema=schema,

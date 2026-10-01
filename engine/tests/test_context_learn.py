@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.llm_client_fixtures import patch_llm_generate
+
 from laya.pipeline.context_learn import maybe_consolidate_context_rules
 
 SPACE = "s1"
@@ -40,7 +42,7 @@ class TestContextRuleConsolidation:
     async def test_below_threshold_is_noop(self, db):
         await _insert_rule(db, "only one")
         with patch("laya.pipeline.context_learn._consolidation_threshold", return_value=5), \
-             patch("laya.pipeline.context_learn.llm_call", new_callable=AsyncMock) as mock_llm:
+             patch_llm_generate() as mock_llm:
             result = await maybe_consolidate_context_rules(SPACE)
         assert result == 0
         mock_llm.assert_not_called()
@@ -52,8 +54,7 @@ class TestContextRuleConsolidation:
         await _insert_rule(db, "my manual rule", source="manual")
 
         with patch("laya.pipeline.context_learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.context_learn.llm_call", new_callable=AsyncMock,
-                   return_value=_llm(["merged A", "merged B"])):
+             patch_llm_generate(return_value=_llm(["merged A", "merged B"])):
             result = await maybe_consolidate_context_rules(SPACE)
 
         assert result == 2
@@ -66,8 +67,7 @@ class TestContextRuleConsolidation:
             await _insert_rule(db, f"learned {i}")
         # LLM returns >= input count → no benefit → must not apply
         with patch("laya.pipeline.context_learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.context_learn.llm_call", new_callable=AsyncMock,
-                   return_value=_llm(["a", "b", "c"])):
+             patch_llm_generate(return_value=_llm(["a", "b", "c"])):
             result = await maybe_consolidate_context_rules(SPACE)
         assert result == 0
         assert sorted(await _rules(db)) == ["learned 0", "learned 1", "learned 2"]
@@ -76,8 +76,7 @@ class TestContextRuleConsolidation:
         for i in range(3):
             await _insert_rule(db, f"learned {i}")
         with patch("laya.pipeline.context_learn._consolidation_threshold", return_value=2), \
-             patch("laya.pipeline.context_learn.llm_call", new_callable=AsyncMock,
-                   return_value=_llm([])):
+             patch_llm_generate(return_value=_llm([])):
             result = await maybe_consolidate_context_rules(SPACE)
         assert result == 0
         assert len(await _rules(db)) == 3

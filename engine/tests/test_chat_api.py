@@ -7,6 +7,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.llm_client_fixtures import patch_llm_generate, patch_llm_stream
 from httpx import ASGITransport, AsyncClient
 
 from laya.llm.client import LLMResponse
@@ -53,8 +55,7 @@ async def _insert_chat_message(db, message_id, role, content, conversation_id):
 class TestChatAPI:
     async def test_send_chat_returns_response(self, db):
         """POST /chat returns a response with assistant message."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response()):
+        with patch_llm_generate(return_value=_mock_llm_response()):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -68,8 +69,7 @@ class TestChatAPI:
 
     async def test_chat_stores_messages(self, db):
         """POST /chat stores both user and assistant messages in DB."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("Response text")):
+        with patch_llm_generate(return_value=_mock_llm_response("Response text")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -116,8 +116,7 @@ class TestChatAPI:
 
     async def test_chat_extracts_card_references(self, db):
         """POST /chat extracts [card:ID] references from assistant response."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("Found [card:card_abc] and [card:card_def].")):
+        with patch_llm_generate(return_value=_mock_llm_response("Found [card:card_abc] and [card:card_def].")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -130,8 +129,7 @@ class TestChatAPI:
 
     async def test_chat_extracts_event_references(self, db):
         """POST /chat extracts [event:ID] references from assistant response."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("See [event:evt_123] for details.")):
+        with patch_llm_generate(return_value=_mock_llm_response("See [event:evt_123] for details.")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -161,8 +159,7 @@ class TestChatAPI:
 
     async def test_chat_llm_failure_returns_error_message(self, db):
         """POST /chat returns graceful error message when LLM fails."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   side_effect=Exception("LLM unavailable")):
+        with patch_llm_generate(side_effect=Exception("LLM unavailable")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -179,8 +176,7 @@ class TestChatAPI:
         await insert_test_event(db, "evt_ctx")
         await insert_test_card(db, "card_ctx", "evt_ctx")
 
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("Found related card.")):
+        with patch_llm_generate(return_value=_mock_llm_response("Found related card.")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 from laya.main import app
                 transport = ASGITransport(app=app)
@@ -191,8 +187,7 @@ class TestChatAPI:
 
     async def test_chat_persists_card_ids(self, db):
         """Sending a chat with card_ids tags the new conversation with the canonical set."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("Response.")):
+        with patch_llm_generate(return_value=_mock_llm_response("Response.")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 with patch("laya.pipeline.chat._should_generate_title", new_callable=AsyncMock, return_value=False):
                     from laya.main import app
@@ -214,8 +209,7 @@ class TestChatAPI:
 
     async def test_by_cards_lookup_returns_latest_conversation(self, db):
         """GET /chat/conversations/by-cards returns the conversation anchored to the cards."""
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=_mock_llm_response("Response.")):
+        with patch_llm_generate(return_value=_mock_llm_response("Response.")):
             with patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
                 with patch("laya.pipeline.chat._should_generate_title", new_callable=AsyncMock, return_value=False):
                     from laya.main import app
@@ -322,7 +316,7 @@ class TestTitleGenerationBackground:
         # Both calls (2048 and 4096 budget) truncate.
         truncated = _title_llm_response("", finish_reason="length")
         mock = AsyncMock(side_effect=[truncated, truncated])
-        with patch("laya.pipeline.chat.llm_call", mock):
+        with patch_llm_generate(new=mock):
             await _generate_title_background(conv_id, "help me triage", None)
 
         assert await self._get_title(db, conv_id) == "New Chat"
@@ -340,7 +334,7 @@ class TestTitleGenerationBackground:
             _title_llm_response("", finish_reason="length"),
             _title_llm_response("Triage Overdue Jira", finish_reason="stop"),
         ])
-        with patch("laya.pipeline.chat.llm_call", mock):
+        with patch_llm_generate(new=mock):
             await _generate_title_background(conv_id, "help me triage", None)
 
         assert await self._get_title(db, conv_id) == "Triage Overdue Jira"
@@ -356,8 +350,7 @@ class TestTitleGenerationBackground:
 
         conv_id = await self._make_convo(db, "conv_title03")
         response = _title_llm_response("Thinking Process:", finish_reason="stop")
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=response):
+        with patch_llm_generate(return_value=response):
             await _generate_title_background(conv_id, "hi", None)
 
         assert await self._get_title(db, conv_id) == "New Chat"
@@ -371,8 +364,7 @@ class TestTitleGenerationBackground:
             "<think>user wants to triage jira tickets</think>\nTriage Jira Tickets",
             finish_reason="stop",
         )
-        with patch("laya.pipeline.chat.llm_call", new_callable=AsyncMock,
-                   return_value=response):
+        with patch_llm_generate(return_value=response):
             with patch("laya.api.websocket.manager.broadcast",
                        new_callable=AsyncMock):
                 await _generate_title_background(conv_id, "triage my jira", None)
@@ -452,7 +444,7 @@ class TestStreamingPersistence:
             )
 
         events = []
-        with patch("laya.pipeline.chat.llm_call_streaming", new=fake_stream), \
+        with patch_llm_stream(fake_stream), \
              patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
             async for ev in process_chat_message_streaming("hi", conversation_id=conv_id):
                 events.append(ev)
@@ -483,7 +475,7 @@ class TestStreamingPersistence:
             await asyncio.Event().wait()  # would hang forever
             yield StreamEvent(type="done")  # pragma: no cover
 
-        with patch("laya.pipeline.chat.llm_call_streaming", new=fake_stream), \
+        with patch_llm_stream(fake_stream), \
              patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
             gen = process_chat_message_streaming("continue", conversation_id=conv_id)
             assert (await anext(gen))["type"] == "chat_stream_start"
@@ -518,7 +510,7 @@ class TestStreamingPersistence:
             async for _ in process_chat_message_streaming("hi", conversation_id=conv_id):
                 pass
 
-        with patch("laya.pipeline.chat.llm_call_streaming", new=fake_stream), \
+        with patch_llm_stream(fake_stream), \
              patch("laya.pipeline.chat.memory_search", new_callable=AsyncMock, return_value=[]):
             task = asyncio.create_task(consume())
             await asyncio.wait_for(llm_entered.wait(), timeout=5)

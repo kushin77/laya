@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from laya.pipeline import summarize
+from tests.llm_client_fixtures import patch_llm_generate
 
 
 def _card(i: int) -> dict:
@@ -129,7 +130,7 @@ async def test_batch_fold_uses_ceil_calls_not_one_per_card(db):
         calls.append(kwargs)
         return _ok_response()
 
-    with patch.object(summarize, "llm_call", new=fake_llm_call), \
+    with patch_llm_generate(new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
          patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", [_card(i) for i in range(15)], [])
@@ -157,7 +158,7 @@ async def test_intra_flush_and_persisted_duplicates_are_skipped(db):
 
     # card_0 is already persisted; card_1 appears twice in the flush.
     flush = [_card(0), _card(1), _card(1), _card(2)]
-    with patch.object(summarize, "llm_call", new=fake_llm_call), \
+    with patch_llm_generate(new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
          patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", flush, [])
@@ -179,7 +180,7 @@ async def test_batch_failure_falls_back_to_per_card(db):
             raise RuntimeError("simulated batch truncation")
         return _ok_response()
 
-    with patch.object(summarize, "llm_call", new=fake_llm_call), \
+    with patch_llm_generate(new=fake_llm_call), \
          patch.object(summarize, "_get_batch_max_cards", return_value=10), \
          patch("laya.pipeline.summarize.publish", new_callable=AsyncMock):
         await summarize._run_summary_update("default", [_card(i) for i in range(3)], [])

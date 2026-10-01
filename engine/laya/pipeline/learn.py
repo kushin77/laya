@@ -12,7 +12,8 @@ import structlog
 
 from laya.db.sqlite import get_db
 from laya.db.timeutil import db_now
-from laya.llm.client import DEFAULT_MAX_TOKENS, llm_call
+from laya.llm.base import get_llm_client
+from laya.llm.client import DEFAULT_MAX_TOKENS
 from laya.llm.prompts.learner import build_learner_messages, get_learner_json_schema
 from laya.llm.prompts.classification_rule_consolidator import (
     build_classification_rule_consolidator_messages,
@@ -90,7 +91,7 @@ async def run_learn_extraction(space_id: str | None) -> int:
         existing_rules=len(existing_rules),
     )
 
-    response = await llm_call(
+    response = await get_llm_client().generate(
         role="router",
         messages=messages,
         response_schema=schema,
@@ -206,7 +207,7 @@ async def maybe_consolidate_classification_rules(space_id: str | None) -> int:
     schema = get_classification_rule_consolidator_json_schema()
 
     try:
-        response = await llm_call(
+        response = await get_llm_client().generate(
             role="router",  # cheap model
             messages=messages,
             response_schema=schema,
