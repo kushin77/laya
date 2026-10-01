@@ -635,3 +635,250 @@ async def reopen_card(card_id: str) -> dict[str, Any]:
     """Reopen a dismissed/archived card back to pending."""
     # allow_restore: dismissed/archived → pending is a deliberate non-forward move.
     return await _update_card_status(card_id, "pending", allow_restore=True)
+
+
+def get_read_definitions() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_cards",
+                "description": (
+                    "Search action cards by keyword, status, priority, or category. "
+                    "By default uses semantic (meaning-based) search: the query is "
+                    "matched by concept and results are ranked by relevance. Set "
+                    "semantic=false for exact keyword matching where every word must "
+                    "appear literally (AND logic, ranked by recency). "
+                    "Results are grouped by entity — cards about the same ticket, "
+                    "PR, thread, etc. appear together with a rolling group_summary "
+                    "(headline, current_status, pending_actions) that reflects the "
+                    "latest state even if only some cards matched. "
+                    "Pagination is card-based — check 'has_more' and use 'offset' "
+                    "to retrieve additional pages."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Free-text search query to match against card header, summary, and intelligence.",
+                        },
+                        "semantic": {
+                            "type": "boolean",
+                            "description": (
+                                "When true (default), uses meaning-based search via "
+                                "embeddings — the query is matched by concept, not exact "
+                                "keywords, and results are ranked by relevance. When false, "
+                                "uses SQL keyword search — the query is split into words "
+                                "(min 2 chars each) and every word must appear in at least "
+                                "one of header/summary/intelligence (AND logic). Results "
+                                "are ranked by recency. Use false for exact identifier "
+                                "lookups (ticket numbers, PR titles, exact names)."
+                            ),
+                            "default": True,
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": [
+                                "pending", "ready", "done",
+                                "failed", "dismissed", "archived", "agent_running",
+                                "awaiting_input",
+                            ],
+                            "description": "Filter by card status.",
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                            "description": "Filter by priority level.",
+                        },
+                        "date_from": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the start of a time range "
+                                "filter (inclusive). Examples: '2026-04-01', '2026-04-01T00:00:00Z'. "
+                                "Use when the user mentions a time period like 'last month', "
+                                "'since April', 'past 2 weeks'. Omit if no temporal intent."
+                            ),
+                        },
+                        "date_to": {
+                            "type": "string",
+                            "description": (
+                                "ISO 8601 date or datetime for the end of a time range "
+                                "filter (inclusive). Examples: '2026-04-30', '2026-04-30T23:59:59Z'. "
+                                "Use when the user mentions a bounded time period like "
+                                "'in April', 'last week', 'between March and May'. Omit for "
+                                "open-ended ranges like 'since April'."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 20, max 200).",
+                            "default": 20,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0). Use with 'total' and 'has_more' from results to page through all matches.",
+                            "default": 0,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_card",
+                "description": "Get full details of a specific action card by its ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {
+                            "type": "string",
+                            "description": "The card ID (e.g. 'card_abc123').",
+                        },
+                    },
+                    "required": ["card_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_card_stats",
+                "description": (
+                    "Get summary statistics about action cards: counts by status, priority, "
+                    "platform, and recent activity. Use for overview/dashboard questions."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_cards_for_event",
+                "description": "Get all action cards that were generated from a specific event.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "event_id": {
+                            "type": "string",
+                            "description": "The event ID to find cards for.",
+                        },
+                    },
+                    "required": ["event_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_cards_by_entity",
+                "description": (
+                    "Get all action cards belonging to a specific entity_id. "
+                    "Returns paginated results — check 'has_more' and use 'offset' to retrieve additional pages."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": (
+                                "The entity ID to look up cards for. "
+                                "Format: 'platform:subject_type:subject_id' "
+                                "(e.g., 'bitbucket:pullrequest:repo/123')."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 25, max 200).",
+                            "default": 25,
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting position for pagination (default 0). Use with 'total' and 'has_more' from results to page through all matches.",
+                            "default": 0,
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+            },
+        },
+    ]
+
+
+def get_write_definitions() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "dismiss_card",
+                "description": "Dismiss an action card (mark it as not needing action). Use when the user says to dismiss, ignore, or skip a card.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {
+                            "type": "string",
+                            "description": "The card ID to dismiss.",
+                        },
+                    },
+                    "required": ["card_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "archive_card",
+                "description": "Archive an action card. Use when the user wants to archive a completed or irrelevant card.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {
+                            "type": "string",
+                            "description": "The card ID to archive.",
+                        },
+                    },
+                    "required": ["card_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "mark_card_done",
+                "description": "Mark an action card as done/completed. Use when the user says a card is done, completed, or finished.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {
+                            "type": "string",
+                            "description": "The card ID to mark as done.",
+                        },
+                    },
+                    "required": ["card_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "reopen_card",
+                "description": "Reopen a dismissed or archived card back to pending status.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {
+                            "type": "string",
+                            "description": "The card ID to reopen.",
+                        },
+                    },
+                    "required": ["card_id"],
+                },
+            },
+        },
+    ]

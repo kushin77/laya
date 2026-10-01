@@ -466,3 +466,246 @@ async def update_smart_grouping(
         },
         "success": True,
     }
+
+
+def get_read_definitions() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_settings",
+                "description": (
+                    "Read current app settings. Use this before making changes so you "
+                    "can report what the old value was, or when the user asks what a "
+                    "setting is currently set to."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "enum": [
+                                "appearance",
+                                "retention",
+                                "briefing",
+                                "notifications",
+                                "feed_preferences",
+                                "smart_grouping",
+                                "group_summaries",
+                                "agent",
+                            ],
+                            "description": (
+                                "Settings section to retrieve. Omit to return all sections."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+    ]
+
+
+def get_write_definitions() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "update_theme",
+                "description": (
+                    "Switch the UI between dark and light mode. "
+                    "The change takes effect immediately in any open browser tab."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "theme": {
+                            "type": "string",
+                            "enum": ["dark", "light"],
+                            "description": "The theme to apply.",
+                        },
+                    },
+                    "required": ["theme"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_retention",
+                "description": (
+                    "Change how long action cards and chat history are kept before "
+                    "being automatically deleted."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_retention_days": {
+                            "type": "integer",
+                            "description": "Days to retain action cards (1–365).",
+                            "minimum": 1,
+                            "maximum": 365,
+                        },
+                        "chat_retention_days": {
+                            "type": "integer",
+                            "description": "Days to retain chat message history (1–365).",
+                            "minimum": 1,
+                            "maximum": 365,
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_briefing",
+                "description": (
+                    "Toggle the daily briefing on or off, or change the time and "
+                    "timezone it is delivered."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Enable or disable the daily briefing.",
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "Delivery time in 24-hour HH:MM format (e.g. '07:30').",
+                        },
+                        "timezone": {
+                            "type": "string",
+                            "description": (
+                                "IANA timezone string for the delivery time "
+                                "(e.g. 'America/New_York', 'Europe/London')."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_notifications",
+                "description": (
+                    "Toggle notifications on or off, or change the minimum card priority "
+                    "that triggers a notification."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Enable or disable notifications.",
+                        },
+                        "min_priority": {
+                            "type": "string",
+                            "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                            "description": (
+                                "Only notify for cards at or above this priority level."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_feed_preferences",
+                "description": (
+                    "Change the default feed view: sort order, archived/bookmarked/unread "
+                    "card visibility, status/priority filters, or space filter."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sortBy": {
+                            "type": "string",
+                            "enum": ["newest", "priority", "category", "platform"],
+                            "description": "Default sort order for the feed.",
+                        },
+                        "showArchived": {
+                            "type": "boolean",
+                            "description": "Whether to show archived cards in the feed.",
+                        },
+                        "showBookmarked": {
+                            "type": "boolean",
+                            "description": "Whether to show only bookmarked cards.",
+                        },
+                        "showUnreadOnly": {
+                            "type": "boolean",
+                            "description": "Whether to show only unread cards.",
+                        },
+                        "statusFilters": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "List of card statuses to show. Empty list means show all."
+                            ),
+                        },
+                        "priorityFilters": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "List of priority levels to show. Empty list means show all."
+                            ),
+                        },
+                        "spaceFilter": {
+                            "type": "string",
+                            "description": "Space ID to filter the feed by, or null for all spaces.",
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_smart_grouping",
+                "description": (
+                    "Toggle context-based grouping of related cards and whether "
+                    "context groups are shown in the feed. Context association "
+                    "detects related cards across platforms (e.g. a Jira ticket "
+                    "and its linked PR). Smart display groups them visually in "
+                    "the feed. Also controls grouping strictness."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "context_association": {
+                            "type": "boolean",
+                            "description": (
+                                "Enable or disable context-based grouping of "
+                                "related cards across platforms."
+                            ),
+                        },
+                        "smart_display": {
+                            "type": "boolean",
+                            "description": (
+                                "Show or hide context groups in the feed view. "
+                                "Only effective when context_association is enabled."
+                            ),
+                        },
+                        "strictness": {
+                            "type": "string",
+                            "enum": ["strict", "balanced", "lenient"],
+                            "description": (
+                                "How aggressively to group cards together. "
+                                "'strict' requires strong signals, 'lenient' "
+                                "groups more liberally."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+    ]
