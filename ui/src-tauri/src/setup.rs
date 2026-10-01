@@ -11,6 +11,7 @@
 use crate::{runtime, sidecar, n8n};
 use crate::{EngineProcess, APP_EXITING};
 use std::sync::atomic::Ordering;
+use tauri::Manager;
 
 /// Event payload emitted during setup for frontend progress display.
 #[derive(serde::Serialize, Clone)]
