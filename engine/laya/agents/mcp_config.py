@@ -21,11 +21,16 @@ import os
 import tempfile
 from typing import Any
 
+import structlog
+
 from laya.config import ENGINE_HOST, ENGINE_PORT, load_settings
 from laya.mcp.scope import enabled_tool_names
 from laya.security.keychain import get_mcp_token
 
+log = structlog.get_logger()
+
 LAYA_MCP_SERVER_NAME = "laya"
+CODEIDX_MCP_SERVER_NAME = "codeidx"
 
 
 def _sse_url(space_id: str | None) -> str:
@@ -45,22 +50,73 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _codeidx_settings() -> dict[str, Any]:
+    mcp_cfg = load_settings().get("mcp", {}) or {}
+    external = mcp_cfg.get("external_servers", {}) or {}
+    return external.get("codeidx", {}) or {}
+
+
+def codeidx_enabled() -> bool:
+    """Return True if the user has enabled the codeidx external MCP server
+    and configured a command that exists and is executable on disk."""
+    cfg = _codeidx_settings()
+    if not cfg.get("enabled"):
+        return False
+    command = (cfg.get("command") or "").strip()
+    if not command:
+        return False
+    if not (os.path.isfile(command) and os.access(command, os.X_OK)):
+        log.warning("codeidx_mcp_command_unusable", command=command)
+        return False
+    return True
+
+
+def _codeidx_server_entry() -> dict[str, Any] | None:
+    """Build the stdio mcpServers entry for codeidx, or None if not usable.
+
+    Never raises — an unusable path logs a warning and is skipped so agent
+    spawn is never broken by a bad external-server configuration.
+    """
+    if not codeidx_enabled():
+        return None
+    command = _codeidx_settings()["command"].strip()
+    return {
+        "type": "stdio",
+        "command": command,
+        "args": [],
+        "env": {
+            "CODEIDX_PROMPT_CACHE_L1": "1",
+            "CODEIDX_KNOWN_ANSWER": "1",
+        },
+    }
+
+
 def build_laya_mcp_config(space_id: str | None) -> dict[str, Any]:
     """Return the JSON-shaped MCP config for `claude --mcp-config`.
 
     Uses the running engine's `/mcp/sse` endpoint with the user's current
     bearer token (when bearer auth is enabled). No subprocess, no env vars —
     the engine is already running.
+
+    When the user has enabled the external `codeidx` code-search MCP server
+    (Settings -> MCP) and its configured command exists and is executable, a
+    second, STDIO-launched `mcpServers` entry is added for it. An unusable
+    command (missing/non-executable) is logged and skipped — it never breaks
+    agent spawn.
     """
-    return {
-        "mcpServers": {
-            LAYA_MCP_SERVER_NAME: {
-                "type": "sse",
-                "url": _sse_url(space_id),
-                "headers": _auth_headers(),
-            }
+    servers: dict[str, Any] = {
+        LAYA_MCP_SERVER_NAME: {
+            "type": "sse",
+            "url": _sse_url(space_id),
+            "headers": _auth_headers(),
         }
     }
+
+    codeidx_entry = _codeidx_server_entry()
+    if codeidx_entry is not None:
+        servers[CODEIDX_MCP_SERVER_NAME] = codeidx_entry
+
+    return {"mcpServers": servers}
 
 
 def build_laya_mcp_config_json(space_id: str | None) -> str:
@@ -102,6 +158,12 @@ def laya_allowed_tool_flags() -> list[str]:
     flags: list[str] = []
     for tool_name in sorted(enabled_tool_names(scopes)):
         flags.extend(["--allowedTools", f"mcp__{LAYA_MCP_SERVER_NAME}__{tool_name}"])
+
+    if codeidx_enabled():
+        # Codeidx tools are read-only code search — allowlisted together, no
+        # further per-tool sub-scoping needed.
+        flags.extend(["--allowedTools", f"mcp__{CODEIDX_MCP_SERVER_NAME}__*"])
+
     return flags
 
 
@@ -112,7 +174,22 @@ MCP_PROMPT_HINT = (
     "`mcp__laya__get_card` to fetch full details by card_id. Prefer these over guessing."
 )
 
+CODEIDX_PROMPT_HINT = (
+    "You also have access to codeidx code-search MCP tools (prefixed `mcp__codeidx__`), "
+    "such as `mcp__codeidx__codeidx_search`, `mcp__codeidx__codeidx_definitions`, "
+    "`mcp__codeidx__codeidx_references`, and `mcp__codeidx__codeidx_query`. Prefer these "
+    "over grepping the repo for compiler-accurate symbol lookups and code search."
+)
+
 
 def augment_prompt_with_mcp_hint(prompt: str) -> str:
-    """Prepend a short hint so the agent knows Laya's MCP tools exist."""
-    return f"{MCP_PROMPT_HINT}\n\n---\n\n{prompt}"
+    """Prepend a short hint so the agent knows Laya's MCP tools exist.
+
+    The codeidx hint is appended only when the external codeidx MCP server is
+    actually enabled and usable, so agents aren't told about tools that
+    weren't wired into their `--mcp-config`.
+    """
+    hint = MCP_PROMPT_HINT
+    if codeidx_enabled():
+        hint = f"{hint} {CODEIDX_PROMPT_HINT}"
+    return f"{hint}\n\n---\n\n{prompt}"

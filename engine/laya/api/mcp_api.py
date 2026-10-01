@@ -233,6 +233,18 @@ class ToolScopes(BaseModel):
     egress: bool
 
 
+class ExternalServerConfig(BaseModel):
+    """Config for a non-Laya STDIO MCP server spawned alongside the built-in
+    HTTP/SSE server for in-app coding agents (see agents/mcp_config.py)."""
+
+    enabled: bool
+    command: str = ""
+
+
+class ExternalServers(BaseModel):
+    codeidx: ExternalServerConfig = ExternalServerConfig(enabled=False, command="")
+
+
 class McpConfigResponse(BaseModel):
     tool_scopes: ToolScopes
     auth_mode: str  # "bearer" | "none"
@@ -240,11 +252,13 @@ class McpConfigResponse(BaseModel):
     token_prefix: str | None
     url: str
     sse_url: str
+    external_servers: ExternalServers
 
 
 class McpConfigUpdate(BaseModel):
     tool_scopes: ToolScopes | None = None
     auth_mode: str | None = None  # "bearer" | "none"
+    external_servers: ExternalServers | None = None
 
 
 class TokenResponse(BaseModel):
@@ -262,6 +276,8 @@ def _build_config_response() -> McpConfigResponse:
     settings = load_settings()
     mcp = settings.get("mcp", {}) or {}
     scopes = mcp.get("tool_scopes", {}) or {}
+    external = mcp.get("external_servers", {}) or {}
+    codeidx = external.get("codeidx", {}) or {}
     from laya.config import ENGINE_HOST, ENGINE_PORT
 
     return McpConfigResponse(
@@ -275,6 +291,12 @@ def _build_config_response() -> McpConfigResponse:
         token_prefix=_token_prefix(),
         url=f"http://{ENGINE_HOST}:{ENGINE_PORT}/mcp/",
         sse_url=f"http://{ENGINE_HOST}:{ENGINE_PORT}/mcp/sse",
+        external_servers=ExternalServers(
+            codeidx=ExternalServerConfig(
+                enabled=bool(codeidx.get("enabled", False)),
+                command=str(codeidx.get("command", "") or ""),
+            )
+        ),
     )
 
 
@@ -300,6 +322,20 @@ async def update_mcp_config(body: McpConfigUpdate) -> McpConfigResponse:
         mcp["auth_mode"] = body.auth_mode
         if body.auth_mode == "bearer" and get_mcp_token() is None:
             store_mcp_token(_generate_token())
+
+    if body.external_servers is not None:
+        command = body.external_servers.codeidx.command.strip()
+        if body.external_servers.codeidx.enabled and not command:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "codeidx.command is required when codeidx is enabled",
+            )
+        mcp["external_servers"] = {
+            "codeidx": {
+                "enabled": body.external_servers.codeidx.enabled,
+                "command": command,
+            }
+        }
 
     settings["mcp"] = mcp
     save_settings(settings)

@@ -16,6 +16,10 @@
 	let copiedConfig = $state(false);
 	let showRotateConfirm = $state(false);
 
+	let codeidxCommandDraft = $state('');
+	let codeidxSaving = $state(false);
+	let codeidxDirty = $state(false);
+
 	const sectionClass = $derived(
 		$glassTheme ? 'glass-section' : 'rounded-xl border border-surface-700 bg-surface-800'
 	);
@@ -83,6 +87,9 @@
 		loading = true;
 		try {
 			config = await engineApi.getMcpConfig();
+			if (!codeidxDirty) {
+				codeidxCommandDraft = config.external_servers.codeidx.command;
+			}
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -157,6 +164,40 @@
 		await navigator.clipboard.writeText(showDirectConfig ? directConfig : desktopConfig);
 		copiedConfig = true;
 		setTimeout(() => (copiedConfig = false), 1500);
+	}
+
+	async function toggleCodeidxEnabled() {
+		if (!config) return;
+		saveError = null;
+		const nextEnabled = !config.external_servers.codeidx.enabled;
+		try {
+			config = await engineApi.updateMcpConfig({
+				external_servers: {
+					codeidx: { enabled: nextEnabled, command: codeidxCommandDraft }
+				}
+			});
+			codeidxDirty = false;
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function saveCodeidxCommand() {
+		if (!config) return;
+		saveError = null;
+		codeidxSaving = true;
+		try {
+			config = await engineApi.updateMcpConfig({
+				external_servers: {
+					codeidx: { enabled: config.external_servers.codeidx.enabled, command: codeidxCommandDraft }
+				}
+			});
+			codeidxDirty = false;
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : String(e);
+		} finally {
+			codeidxSaving = false;
+		}
 	}
 </script>
 
@@ -386,6 +427,63 @@
 				to the URL. Register the same server multiple times under different names with
 				different space IDs to give each client its own scoped view.
 			</p>
+		</div>
+
+		<!-- External Tools -->
+		<div class="{sectionClass} p-6">
+			<h3 class="mb-1 text-laya-heading font-semibold text-surface-50">External Tools</h3>
+			<p class="mb-5 text-laya-base text-surface-400">
+				Enable additional, non-Laya MCP servers for in-app coding agents. Codeidx adds
+				compiler-accurate code-search tools (symbol lookups, references, definitions) launched
+				as a local subprocess alongside Laya's own MCP server.
+			</p>
+
+			<div class="rounded-lg border border-surface-700 bg-surface-900 p-4">
+				<div class="mb-3 flex items-start justify-between gap-4">
+					<div class="min-w-0 flex-1">
+						<div class="text-laya-base font-medium text-surface-100">Codeidx code search</div>
+						<div class="mt-1 text-laya-secondary text-surface-400">
+							Code-search tools (codeidx_search, codeidx_definitions, codeidx_references,
+							codeidx_query) made available to in-app coding agents as `mcp__codeidx__*`.
+						</div>
+					</div>
+					<button
+						class="relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors {config.external_servers.codeidx.enabled ? 'bg-laya-orange' : 'bg-surface-600'}"
+						onclick={toggleCodeidxEnabled}
+						role="switch"
+						aria-checked={config.external_servers.codeidx.enabled}
+						aria-label="Codeidx integration"
+					>
+						<span
+							class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform {config.external_servers.codeidx.enabled ? 'translate-x-5' : 'translate-x-0'}"
+						></span>
+					</button>
+				</div>
+
+				<div class="mb-2 text-laya-micro uppercase tracking-wider text-surface-400">
+					Command path
+				</div>
+				<div class="flex items-center gap-3">
+					<input
+						type="text"
+						bind:value={codeidxCommandDraft}
+						oninput={() => (codeidxDirty = true)}
+						placeholder="/home/alex/code-indexing/scripts/codeidx-mcp"
+						class="flex-1 rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 font-mono text-laya-secondary text-surface-200"
+					/>
+					<button
+						class="rounded-md border border-surface-600 px-3 py-1.5 text-laya-secondary text-surface-200 transition-colors hover:border-laya-orange hover:text-laya-orange disabled:opacity-50"
+						onclick={saveCodeidxCommand}
+						disabled={codeidxSaving || !codeidxDirty}
+					>
+						{codeidxSaving ? 'Saving…' : 'Save'}
+					</button>
+				</div>
+				<p class="mt-2 text-laya-secondary text-surface-500">
+					Path to the codeidx MCP launcher on this machine. Must exist and be executable, or the
+					server is skipped at agent spawn time.
+				</p>
+			</div>
 		</div>
 
 		{#if saveError}
