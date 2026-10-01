@@ -261,6 +261,11 @@ async def lifespan(app: FastAPI):
     from laya.pipeline.llm_hooks import install as install_llm_hooks
     install_llm_hooks()
 
+    # Inject the concrete LLMClient (#12) — pipeline stages resolve it via
+    # laya.llm.base.get_llm_client() instead of importing llm_call directly.
+    from laya.llm.base import LiteLLMClient, set_llm_client
+    set_llm_client(LiteLLMClient())
+
     # Ensure an MCP bearer token exists when auth_mode=bearer so the SSE
     # endpoint is immediately usable. Token only generated if missing.
     ensure_mcp_startup_token()
