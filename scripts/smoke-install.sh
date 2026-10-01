@@ -15,6 +15,7 @@
 #                       lock cannot be used on a machine
 #   --ml                also install the ML packages and embed with the default model
 #   --no-tests          skip the engine test suite
+#   --no-embedding      skip the embedding check (avoids the first-run model download)
 #   --keep              keep the venv and print its path
 
 set -euo pipefail
@@ -27,6 +28,7 @@ INSTALLER="uv"
 SOURCE="lock"
 WITH_ML=0
 RUN_TESTS=1
+RUN_EMBEDDING=1
 KEEP=0
 
 while [ $# -gt 0 ]; do
@@ -36,6 +38,7 @@ while [ $# -gt 0 ]; do
         --source) SOURCE="$2"; shift 2 ;;
         --ml) WITH_ML=1; shift ;;
         --no-tests) RUN_TESTS=0; shift ;;
+        --no-embedding) RUN_EMBEDDING=0; shift ;;
         --keep) KEEP=1; shift ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
@@ -140,8 +143,10 @@ echo "── Importing the engine ──"
 mkdir -p "$WORK/home"
 HOME="$WORK/home" USERPROFILE="$WORK/home" "$PY" -c "import laya.main; print('  laya.main imported')"
 
-echo "── Embedding with the built-in ONNX model ──"
-"$PY" "$REPO_ROOT/scripts/check-embedding.py" default
+if [ "$RUN_EMBEDDING" = 1 ]; then
+    echo "── Embedding with the built-in ONNX model ──"
+    "$PY" "$REPO_ROOT/scripts/check-embedding.py" default
+fi
 
 if [ "$WITH_ML" = 1 ]; then
     echo "── Installing ML packages ──"
