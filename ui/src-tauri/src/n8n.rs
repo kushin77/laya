@@ -13,18 +13,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// On Windows, attach CREATE_NO_WINDOW so spawned child processes do not
-/// flash a console window. No-op on other platforms.
-#[cfg(windows)]
-fn no_window(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn no_window(_cmd: &mut Command) {}
-
 /// Shared HTTP client for n8n health checks — avoids creating a new TCP
 /// connection (and `reqwest::blocking::Client`) on every call.
 fn shared_client() -> &'static reqwest::blocking::Client {
@@ -45,7 +33,7 @@ pub const N8N_PORT: u16 = 45678;
 
 // ── Path helpers ────────────────────────────────────────────────────────
 
-use crate::process_util::{home_dir, laya_home};
+use crate::process_util::{home_dir, laya_home, no_window};
 
 /// Where the n8n npm package is installed: ~/.laya/n8n_module/
 fn n8n_module_dir() -> PathBuf {
@@ -661,7 +649,7 @@ pub fn startup_n8n() -> N8nStartResult {
         // ~/.laya/...). A user's own n8n that happens to sit on this port is
         // left alone rather than killed (review §6).
         log::warn!("Orphaned n8n on port {} — killing and respawning", N8N_PORT);
-        crate::kill_process_on_port(N8N_PORT, "laya");
+        crate::process_util::kill_process_on_port(N8N_PORT, "laya");
         std::thread::sleep(Duration::from_secs(1));
 
         // If something is STILL answering on the port, it was a foreign process
