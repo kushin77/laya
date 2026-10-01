@@ -9,6 +9,11 @@
 	import { feedFilters, feedDate, feedPrevDate, feedNextDate, localToday, allDaysSavedDate, type FeedFilters } from '$lib/stores/feedFilters';
 	import type { ActionCard, CardGroup, GroupSummary, DaySummary, DayEventsResponse, SpaceSummary, Tag } from '$lib/api/types';
 	import { reduceCardUpdated, removeCardFromGroups, type CardUpdatePayload } from '$lib/feed/cardUpdateReducer';
+	import { mergeSpaceSummaries } from '$lib/feed/summaryMerge';
+	import { findCardElement, getScrollParent, scrollElToCenter } from '$lib/feed/scroll';
+	import { getCurrentWord, tagAutocompleteQueryFor } from '$lib/feed/searchTokens';
+	import { buildGroupedParams } from '$lib/feed/groupedParams';
+	import { recomputeRelatedEntityIds } from '$lib/feed/relatedFilter';
 	import CardGroupComponent from '$lib/components/feed/CardGroup.svelte';
 	import ActionCardComponent from '$lib/components/feed/ActionCard.svelte';
 	import CardDetail from '$lib/components/feed/CardDetail.svelte';
@@ -266,19 +271,15 @@
 
 	async function handleUnlinked(cardId: string, entityId: string) {
 		if (!$feedFilters.showRelated) return;
-		const sourceCardId = $feedFilters.relatedSourceCardId;
-		if (!sourceCardId) { clearRelatedFilter(true); return; }
-		try {
-			const data = await engineApi.getRelatedCards(sourceCardId);
-			if (data.total_related_cards === 0) { clearRelatedFilter(true); return; }
-			const sourceEntityId = $feedFilters.relatedSourceEntityId;
-			const entityIds = [...new Set([
-				sourceEntityId,
-				...data.related_cards.map((r: { entity_id: string }) => r.entity_id)
-			].filter(Boolean))] as string[];
-			$feedFilters.relatedEntityIds = entityIds;
-		} catch {
+		const result = await recomputeRelatedEntityIds(
+			$feedFilters.relatedSourceCardId,
+			$feedFilters.relatedSourceEntityId,
+			engineApi.getRelatedCards
+		);
+		if (result.clear) {
 			clearRelatedFilter(true);
+		} else {
+			$feedFilters.relatedEntityIds = result.entityIds;
 		}
 	}
 
@@ -289,18 +290,11 @@
 			clearRelatedFilter(true);
 			return;
 		}
-		if (!sourceCardId) { clearRelatedFilter(true); return; }
-		try {
-			const data = await engineApi.getRelatedCards(sourceCardId);
-			if (data.total_related_cards === 0) { clearRelatedFilter(true); return; }
-			const sourceEntityId = $feedFilters.relatedSourceEntityId;
-			const entityIds = [...new Set([
-				sourceEntityId,
-				...data.related_cards.map((r: { entity_id: string }) => r.entity_id)
-			].filter(Boolean))] as string[];
-			$feedFilters.relatedEntityIds = entityIds;
-		} catch {
+		const result = await recomputeRelatedEntityIds(sourceCardId, $feedFilters.relatedSourceEntityId, engineApi.getRelatedCards);
+		if (result.clear) {
 			clearRelatedFilter(true);
+		} else {
+			$feedFilters.relatedEntityIds = result.entityIds;
 		}
 	}
 
@@ -333,20 +327,7 @@
 	let tagAutocompletePos = $state({ top: 0, left: 0 });
 	let tagAutocompleteIdx = $state(0);
 
-	function getCurrentWord(input: HTMLInputElement): string {
-		const pos = input.selectionStart ?? input.value.length;
-		const before = input.value.slice(0, pos);
-		const match = before.match(/(\S+)$/);
-		return match ? match[1] : '';
-	}
-
-	const tagAutocompleteQuery = $derived.by(() => {
-		if (!showTagAutocomplete) return '';
-		const tokens = searchQuery.trim().split(/\s+/);
-		const last = tokens[tokens.length - 1] || '';
-		if (last.startsWith('#')) return last.slice(1).toLowerCase();
-		return '';
-	});
+	const tagAutocompleteQuery = $derived(tagAutocompleteQueryFor(searchQuery, showTagAutocomplete));
 
 	const tagSuggestions = $derived(
 		tagAutocompleteQuery
@@ -405,26 +386,6 @@
 	let daySummary = $state<DaySummary | null>(null);
 	let summaryUpdatedAt = $state<string | null>(null);
 	let summaryLoading = $state(false);
-
-	function mergeSpaceSummaries(summaries: SpaceSummary[]): { merged: DaySummary; updatedAt: string | null } {
-		const merged: DaySummary = { events_and_meetings: [], action_items: [], key_updates: [] };
-		let latest: string | null = null;
-		for (const ss of summaries) {
-			if (!ss.summary) continue;
-			if (ss.updated_at && (!latest || ss.updated_at > latest)) latest = ss.updated_at;
-			for (const section of ['events_and_meetings', 'action_items', 'key_updates'] as const) {
-				for (const item of ss.summary[section]) {
-					merged[section].push({
-						...item,
-						space_id: ss.space_id,
-						space_name: ss.space_name,
-						space_color: ss.space_color,
-					});
-				}
-			}
-		}
-		return { merged, updatedAt: latest };
-	}
 
 	// Persist selected card/group ID across webview navigations (e.g. external link → back)
 	const SELECTED_CARD_KEY = 'laya_feed_selected_card';
@@ -489,46 +450,16 @@
 		});
 	}
 
-	// Build the /cards/grouped query params shared by loadGroups and loadMoreGroups
-	// (minus limit/offset, which the caller sets). Pure of the fetch itself so the
-	// two paths can't drift.
-	function buildGroupedParams(f: FeedFilters, date: string) {
-		// Read searchQuery WITHOUT tracking it. loadGroups() runs synchronously
-		// inside the $feedDate/$feedFilters reload effect, so a tracked read here
-		// silently made searchQuery a dependency of that effect — every keystroke
-		// re-ran it and fired a full GET /cards/grouped, defeating the 300ms search
-		// debounce (review §2 UI — P4-29). Backend search only applies in all-days
-		// mode (see the search/tags params below), which reloads via its own
-		// debounced effect; normal-mode search is filtered client-side.
-		const _tagTokens: string[] = [];
-		const _textTokens: string[] = [];
-		untrack(() => {
-			for (const token of searchQuery.trim().split(/\s+/)) {
-				if (token.startsWith('#')) {
-					// Bare '#' is a half-typed tag, not a search for a literal '#'.
-					if (token.length > 1) _tagTokens.push(token.slice(1));
-				} else if (token) {
-					_textTokens.push(token);
-				}
-			}
-		});
-		const _searchText = _textTokens.join(' ');
-		const isAllDays = f.showAllDaysSearch;
-		return {
-			status: f.statusFilters.length ? f.statusFilters.join(',') : undefined,
-			priority: f.priorityFilters.length ? f.priorityFilters.join(',') : undefined,
-			sort: f.sortBy,
-			sort_asc: f.sortAsc || undefined,
-			show_archived: f.showArchived || undefined,
-			date: (f.showBookmarked || f.showRelated || isAllDays) ? undefined : date,
-			space_id: f.spaceFilter.length ? f.spaceFilter.join(',') : undefined,
-			bookmarked: f.showBookmarked || undefined,
-			related_entity_ids: f.showRelated ? f.relatedEntityIds.join(',') : undefined,
-			has_workspace: f.hasWorkspace || undefined,
-			unread_only: f.showUnreadOnly || undefined,
-			search: isAllDays && _searchText ? _searchText : undefined,
-			tags: isAllDays && _tagTokens.length ? _tagTokens.join(',') : undefined
-		};
+	// Wraps buildGroupedParams (lib/feed/groupedParams.ts), pinning the UNTRACKED
+	// read of searchQuery at this call site. loadGroups() runs synchronously
+	// inside the $feedDate/$feedFilters reload effect, so a tracked read here
+	// would silently make searchQuery a dependency of that effect — every
+	// keystroke would re-run it and fire a full GET /cards/grouped, defeating the
+	// 300ms search debounce (review §2 UI — P4-29). Backend search only applies
+	// in all-days mode, which reloads via its own debounced effect; normal-mode
+	// search is filtered client-side.
+	function buildParamsForCurrentQuery(f: FeedFilters, date: string) {
+		return buildGroupedParams(f, date, untrack(() => searchQuery));
 	}
 
 	// Fetch the next page of groups and APPEND (dedup by entity_id — offset paging
@@ -539,7 +470,7 @@
 		loadingMoreGroups = true;
 		try {
 			const data = await engineApi.getGroupedCards({
-				...buildGroupedParams($feedFilters, $feedDate),
+				...buildParamsForCurrentQuery($feedFilters, $feedDate),
 				limit: GROUPS_PAGE_SIZE,
 				offset: groups.length
 			});
@@ -562,7 +493,7 @@
 		try {
 			const f = $feedFilters;
 			const data = await engineApi.getGroupedCards({
-				...buildGroupedParams(f, $feedDate),
+				...buildParamsForCurrentQuery(f, $feedDate),
 				limit: GROUPS_PAGE_SIZE,
 				offset: 0
 			});
@@ -948,42 +879,6 @@
 			// Already on the right date, scroll now
 			scrollToCard(card.card_id);
 		}
-	}
-
-	// Find the DOM element for a card. Prefers the individual ActionCard element
-	// over the group wrapper — the group wrapper also carries data-card-id for
-	// its topCard, but is ~11k px tall for large groups so scrolling to it
-	// centers the group, not the card. Falls back to the group wrapper when
-	// the group is collapsed (individual card not rendered).
-	function findCardElement(cardId: string): Element | null {
-		return document.querySelector(`[data-card-id="${cardId}"]:not([data-group-entity])`)
-			?? document.querySelector(`[data-card-id="${cardId}"]`);
-	}
-
-	// Walk up the DOM to find the nearest scrollable ancestor (overflow auto/scroll
-	// with content that actually overflows). This avoids assuming which container
-	// scrolls — the layout has nested overflow-auto on both <main> and containerEl.
-	function getScrollParent(el: Element): Element {
-		let parent = el.parentElement;
-		while (parent) {
-			const { overflowY } = getComputedStyle(parent);
-			if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) {
-				return parent;
-			}
-			parent = parent.parentElement;
-		}
-		return document.documentElement;
-	}
-
-	// Scroll an element to the vertical center of its nearest scrollable ancestor.
-	// Uses manual scrollTo on the specific container to avoid scrollIntoView's
-	// nested scroll container bug (it scrolls ALL overflow ancestors unpredictably).
-	function scrollElToCenter(el: Element, behavior: ScrollBehavior = 'smooth') {
-		const scroller = getScrollParent(el);
-		const scrollerRect = scroller.getBoundingClientRect();
-		const elRect = el.getBoundingClientRect();
-		const targetTop = scroller.scrollTop + (elRect.top - scrollerRect.top) - (scrollerRect.height - elRect.height) / 2;
-		scroller.scrollTo({ top: targetTop, behavior });
 	}
 
 	function scrollToCard(cardId: string) {
