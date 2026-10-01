@@ -197,6 +197,15 @@ export interface McpToolScopes {
 	egress: boolean;
 }
 
+export interface McpExternalServerConfig {
+	enabled: boolean;
+	command: string;
+}
+
+export interface McpExternalServers {
+	codeidx: McpExternalServerConfig;
+}
+
 export interface McpConfig {
 	tool_scopes: McpToolScopes;
 	auth_mode: McpAuthMode;
@@ -204,11 +213,13 @@ export interface McpConfig {
 	token_prefix: string | null;
 	url: string;
 	sse_url: string;
+	external_servers: McpExternalServers;
 }
 
 export interface McpConfigUpdate {
 	tool_scopes?: McpToolScopes;
 	auth_mode?: McpAuthMode;
+	external_servers?: McpExternalServers;
 }
 
 export interface McpToken {

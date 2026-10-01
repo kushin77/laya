@@ -131,6 +131,57 @@ class TestMcpConfigAndToken:
         r = client.put("/mcp/config", json={"auth_mode": "garbage"})
         assert r.status_code == 400
 
+    def test_get_config_includes_external_servers_defaults(
+        self, client: TestClient, restore_settings
+    ):
+        r = client.get("/mcp/config")
+        assert r.status_code == 200
+        codeidx = r.json()["external_servers"]["codeidx"]
+        assert codeidx == {"enabled": False, "command": ""}
+
+    def test_put_external_servers_persists(self, client: TestClient, restore_settings):
+        r = client.put(
+            "/mcp/config",
+            json={
+                "external_servers": {
+                    "codeidx": {"enabled": True, "command": "/usr/local/bin/codeidx-mcp"}
+                }
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()["external_servers"]["codeidx"]
+        assert body == {"enabled": True, "command": "/usr/local/bin/codeidx-mcp"}
+
+        persisted = load_settings()["mcp"]["external_servers"]["codeidx"]
+        assert persisted["enabled"] is True
+        assert persisted["command"] == "/usr/local/bin/codeidx-mcp"
+
+    def test_put_external_servers_enabled_without_command_rejected(
+        self, client: TestClient, restore_settings
+    ):
+        r = client.put(
+            "/mcp/config",
+            json={"external_servers": {"codeidx": {"enabled": True, "command": ""}}},
+        )
+        assert r.status_code == 400
+
+    def test_put_external_servers_disabled_without_command_ok(
+        self, client: TestClient, restore_settings
+    ):
+        r = client.put(
+            "/mcp/config",
+            json={"external_servers": {"codeidx": {"enabled": False, "command": ""}}},
+        )
+        assert r.status_code == 200
+        assert r.json()["external_servers"]["codeidx"] == {"enabled": False, "command": ""}
+
+    def test_put_external_servers_rejects_wrong_type(self, client: TestClient, restore_settings):
+        r = client.put(
+            "/mcp/config",
+            json={"external_servers": {"codeidx": {"enabled": "yes", "command": 123}}},
+        )
+        assert r.status_code == 422
+
     def test_token_refresh_rotates(self, client: TestClient, restore_settings):
         store_mcp_token("lyat_original")
         r = client.post("/mcp/token/refresh")

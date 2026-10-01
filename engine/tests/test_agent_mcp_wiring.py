@@ -12,15 +12,20 @@ through to the `claude -p` command line.
 
 import json
 import os
+import stat
+import tempfile
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from laya.agents.claude_code import ClaudeCodeAgent
 from laya.agents.mcp_config import (
+    CODEIDX_PROMPT_HINT,
     MCP_PROMPT_HINT,
+    augment_prompt_with_mcp_hint,
     build_laya_mcp_config,
     build_laya_mcp_config_json,
+    codeidx_enabled,
     laya_allowed_tool_flags,
 )
 from laya.config import ENGINE_HOST, ENGINE_PORT, load_settings, save_settings
@@ -107,6 +112,131 @@ class TestMcpConfigBuilder:
         }
         save_settings(s)
         assert laya_allowed_tool_flags() == []
+
+
+@pytest.fixture
+def fake_codeidx_binary():
+    """A real, executable file on disk to use as a valid codeidx command."""
+    fd, path = tempfile.mkstemp(prefix="codeidx_mcp_", suffix=".sh")
+    os.write(fd, b"#!/bin/sh\necho ok\n")
+    os.close(fd)
+    os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    yield path
+    os.unlink(path)
+
+
+class TestCodeidxExternalServer:
+    def test_disabled_by_default_no_second_server(self, reset_mcp_settings):
+        cfg = build_laya_mcp_config(space_id=None)
+        assert "codeidx" not in cfg["mcpServers"]
+        assert codeidx_enabled() is False
+
+    def test_enabled_with_valid_executable_path_adds_server(
+        self, reset_mcp_settings, fake_codeidx_binary
+    ):
+        s = load_settings()
+        s.setdefault("mcp", {})["external_servers"] = {
+            "codeidx": {"enabled": True, "command": fake_codeidx_binary}
+        }
+        save_settings(s)
+
+        assert codeidx_enabled() is True
+        cfg = build_laya_mcp_config(space_id=None)
+        codeidx = cfg["mcpServers"]["codeidx"]
+        assert codeidx["type"] == "stdio"
+        assert codeidx["command"] == fake_codeidx_binary
+        assert codeidx["args"] == []
+        assert codeidx["env"] == {
+            "CODEIDX_PROMPT_CACHE_L1": "1",
+            "CODEIDX_KNOWN_ANSWER": "1",
+        }
+        # Laya's own server entry is unaffected.
+        assert cfg["mcpServers"]["laya"]["type"] == "sse"
+
+    def test_enabled_but_path_does_not_exist_falls_back_silently(self, reset_mcp_settings):
+        s = load_settings()
+        s.setdefault("mcp", {})["external_servers"] = {
+            "codeidx": {"enabled": True, "command": "/nonexistent/path/codeidx-mcp"}
+        }
+        save_settings(s)
+
+        assert codeidx_enabled() is False
+        cfg = build_laya_mcp_config(space_id=None)
+        assert "codeidx" not in cfg["mcpServers"]
+        # Laya's own server is still wired — a bad codeidx path never breaks spawn.
+        assert cfg["mcpServers"]["laya"]["type"] == "sse"
+
+    def test_enabled_but_path_not_executable_falls_back(self, reset_mcp_settings):
+        fd, path = tempfile.mkstemp(prefix="codeidx_not_exec_")
+        os.write(fd, b"not a script")
+        os.close(fd)
+        os.chmod(path, 0o644)
+        try:
+            s = load_settings()
+            s.setdefault("mcp", {})["external_servers"] = {
+                "codeidx": {"enabled": True, "command": path}
+            }
+            save_settings(s)
+            assert codeidx_enabled() is False
+            cfg = build_laya_mcp_config(space_id=None)
+            assert "codeidx" not in cfg["mcpServers"]
+        finally:
+            os.unlink(path)
+
+    def test_enabled_flag_false_skips_regardless_of_command(
+        self, reset_mcp_settings, fake_codeidx_binary
+    ):
+        s = load_settings()
+        s.setdefault("mcp", {})["external_servers"] = {
+            "codeidx": {"enabled": False, "command": fake_codeidx_binary}
+        }
+        save_settings(s)
+        assert codeidx_enabled() is False
+        cfg = build_laya_mcp_config(space_id=None)
+        assert "codeidx" not in cfg["mcpServers"]
+
+    def test_allowed_tool_flags_include_codeidx_wildcard_when_enabled(
+        self, reset_mcp_settings, fake_codeidx_binary
+    ):
+        s = load_settings()
+        s["mcp"] = {
+            "tool_scopes": {"read": False, "write": False, "egress": False},
+            "auth_mode": "none",
+            "external_servers": {"codeidx": {"enabled": True, "command": fake_codeidx_binary}},
+        }
+        save_settings(s)
+        flags = laya_allowed_tool_flags()
+        assert "mcp__codeidx__*" in flags
+
+    def test_allowed_tool_flags_exclude_codeidx_when_disabled(self, reset_mcp_settings):
+        s = load_settings()
+        s["mcp"] = {
+            "tool_scopes": {"read": False, "write": False, "egress": False},
+            "auth_mode": "none",
+        }
+        save_settings(s)
+        flags = laya_allowed_tool_flags()
+        assert not any("codeidx" in f for f in flags)
+
+    def test_prompt_hint_mentions_codeidx_only_when_enabled(
+        self, reset_mcp_settings, fake_codeidx_binary
+    ):
+        s = load_settings()
+        s.setdefault("mcp", {})["external_servers"] = {
+            "codeidx": {"enabled": False, "command": ""}
+        }
+        save_settings(s)
+        prompt = augment_prompt_with_mcp_hint("do the task")
+        assert CODEIDX_PROMPT_HINT not in prompt
+        assert MCP_PROMPT_HINT in prompt
+
+        s = load_settings()
+        s.setdefault("mcp", {})["external_servers"] = {
+            "codeidx": {"enabled": True, "command": fake_codeidx_binary}
+        }
+        save_settings(s)
+        prompt = augment_prompt_with_mcp_hint("do the task")
+        assert CODEIDX_PROMPT_HINT in prompt
 
 
 class TestClaudeCodeMcpArgs:

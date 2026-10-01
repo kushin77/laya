@@ -113,6 +113,14 @@ DEFAULT_SETTINGS = {
     "mcp": {
         "tool_scopes": {"read": True, "write": False, "egress": False},
         "auth_mode": "bearer",  # "bearer" | "none"
+        # Additional, non-Laya MCP servers spawned alongside the built-in
+        # HTTP/SSE server for in-app coding agents. Each entry is launched as
+        # a STDIO subprocess (see agents/mcp_config.py). "command" is a local
+        # filesystem path to the launcher binary/script; left empty/disabled
+        # until the user configures it in Settings -> MCP.
+        "external_servers": {
+            "codeidx": {"enabled": False, "command": ""},
+        },
     },
     "omni": {
         "enabled": True,
