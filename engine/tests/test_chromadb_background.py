@@ -17,8 +17,19 @@ async def test_wait_for_collection_returns_connected_collection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_background_connect_unblocks_waiters(tmp_path, monkeypatch):
-    """Callers waiting during background init get the collection once it connects (#24)."""
+    """Callers waiting during background init get the collection once it connects (#24).
+
+    `connect_chromadb_background` runs `connect_chromadb` via `asyncio.to_thread`,
+    so a bare `asyncio.sleep(0)` after starting it gives no guarantee the real
+    connect hasn't already finished on the executor thread — on a loaded/slow
+    runner the event loop can go a long time between ticks, which is plenty for
+    the thread to complete and set `_collection` before the waiter's first step.
+    Gate on `_connecting` directly, and hold the real connect behind a
+    `threading.Event` so the waiter is deterministically guaranteed to observe
+    "still connecting" instead of hoping a sleep(0) wins a scheduling race.
+    """
     import asyncio
+    import threading
 
     from laya.db import chromadb_store
 
@@ -26,12 +37,28 @@ async def test_background_connect_unblocks_waiters(tmp_path, monkeypatch):
     monkeypatch.setattr(chromadb_store, "_choose_embedding_function", lambda *args, **kwargs: None)
     monkeypatch.setattr(chromadb_store, "_collection", None)
 
+    release = threading.Event()
+    real_connect_chromadb = chromadb_store.connect_chromadb
+
+    def _blocking_connect():
+        assert release.wait(timeout=5), "test bug: connect never released"
+        return real_connect_chromadb()
+
+    monkeypatch.setattr(chromadb_store, "connect_chromadb", _blocking_connect)
+
     connecting = asyncio.create_task(chromadb_store.connect_chromadb_background())
-    await asyncio.sleep(0)
+    for _ in range(1000):
+        if chromadb_store._connecting:
+            break
+        await asyncio.sleep(0)
+    else:
+        raise AssertionError("background connect never started")
+
     waiter = asyncio.create_task(chromadb_store.wait_for_collection(timeout=30))
     await asyncio.sleep(0)
     assert not waiter.done()
 
+    release.set()
     await connecting
     assert (await waiter).name == chromadb_store.COLLECTION_NAME
     chromadb_store.disconnect_chromadb()
