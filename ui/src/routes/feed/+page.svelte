@@ -14,16 +14,14 @@
 	import { getCurrentWord, tagAutocompleteQueryFor } from '$lib/feed/searchTokens';
 	import { buildGroupedParams } from '$lib/feed/groupedParams';
 	import { recomputeRelatedEntityIds } from '$lib/feed/relatedFilter';
-	import CardGroupComponent from '$lib/components/feed/CardGroup.svelte';
-	import ActionCardComponent from '$lib/components/feed/ActionCard.svelte';
 	import CardDetail from '$lib/components/feed/CardDetail.svelte';
+	import FeedBody from '$lib/components/feed/FeedBody.svelte';
 	import GroupSummaryDetail from '$lib/components/feed/GroupSummaryDetail.svelte';
 	import SummaryModal from '$lib/components/feed/SummaryModal.svelte';
 	import FilterPopover from '$lib/components/feed/FilterPopover.svelte';
+	import FeedToolbarActions from '$lib/components/feed/FeedToolbarActions.svelte';
 	import { feedViewMode } from '$lib/stores/feedView';
 	import { feedSelection } from '$lib/stores/feedSelection';
-	import ListRow from '$lib/components/feed/ListRow.svelte';
-	import ListGroupComponent from '$lib/components/feed/ListGroup.svelte';
 	import BulkActionsDropdown from '$lib/components/feed/BulkActionsDropdown.svelte';
 	import LinkDialog from '$lib/components/feed/LinkDialog.svelte';
 	import { recentCards, recentDrawerOpen, trackCardVisit, trackGroupVisit, type RecentCardEntry } from '$lib/stores/recentCards';
@@ -37,14 +35,12 @@
 	import { summaryModalOpen as summaryModalStore } from '$lib/stores/summaryModal';
 	import { searchFocusSignal, feedSearchQuery } from '$lib/stores/searchFocus';
 	import { portal } from '$lib/actions/portal';
-	import TimelineView from '$lib/components/feed/timeline/TimelineView.svelte';
 	import { platformKey } from '$lib/utils/cardVisuals';
 	import { threadAttention } from '$lib/utils/threadAttention';
 	import { formatMinutes, localMinutes } from '$lib/timeline/scale';
 
 	// Filter toolbar state
 	let filterPopoverOpen = $state(false);
-	let filterBtnEl: HTMLElement | undefined = $state();
 	let filterMenuPos = $state({ top: 0, left: 0 });
 
 	// Responsive toolbar: collapse action buttons into overflow menu when toolbar is too narrow
@@ -1812,165 +1808,22 @@
 
 		<div class="flex-1" data-feed-spacer></div>
 
-		{#if feedActionsCollapsed}
-			<!-- Overflow menu for narrow toolbar -->
-			<div class="feed-overflow-menu relative">
-				<button
-					onclick={() => (feedActionsMenuOpen = !feedActionsMenuOpen)}
-					class="flex items-center gap-1 rounded-lg border px-2 py-1 text-laya-secondary transition-colors
-						{hasActiveFilters || $feedFilters.showBookmarked || $recentDrawerOpen || summaryModalOpen
-							? 'border-laya-orange/30 bg-laya-orange/10 text-laya-orange'
-							: 'border-surface-700 bg-surface-800/60 text-surface-400 hover:text-surface-200 hover:border-surface-600'}"
-					aria-label="More actions"
-				>
-					<svg class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-						<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
-					</svg>
-				</button>
-				{#if feedActionsMenuOpen}
-					<div class="absolute right-0 top-full z-[100] mt-1 flex flex-col rounded-lg border border-surface-600 bg-surface-800 py-1 shadow-lg min-w-[160px]">
-						<button
-							class="flex w-full items-center gap-2 whitespace-nowrap px-4 py-1.5 text-laya-secondary transition-colors hover:bg-surface-700
-								{hasActiveFilters ? 'text-laya-orange' : 'text-surface-300'}"
-							onclick={(e: MouseEvent) => {
-								const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-								filterMenuPos = { top: r.top, left: r.left - 264 };
-								filterPopoverOpen = !filterPopoverOpen;
-							}}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-							</svg>
-							Filters
-							{#if hasActiveFilters}
-								<span class="flex h-4 w-4 items-center justify-center rounded-full bg-laya-orange text-laya-micro font-bold text-surface-900">{activeFilterCount}</span>
-							{/if}
-						</button>
-						<button
-							class="flex w-full items-center gap-2 whitespace-nowrap px-4 py-1.5 text-laya-secondary transition-colors hover:bg-surface-700
-								{$recentDrawerOpen ? 'text-laya-orange' : 'text-surface-300'}"
-							onclick={() => { toggleRecentDrawer(); feedActionsMenuOpen = false; }}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-							</svg>
-							Recent
-						</button>
-						<button
-							class="flex w-full items-center gap-2 whitespace-nowrap px-4 py-1.5 text-laya-secondary transition-colors hover:bg-surface-700
-								{$feedFilters.showBookmarked ? 'text-laya-orange' : 'text-surface-300'}"
-							onclick={() => { $feedFilters.showBookmarked = !$feedFilters.showBookmarked; feedActionsMenuOpen = false; }}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0" fill={$feedFilters.showBookmarked ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-							</svg>
-							Bookmarks
-						</button>
-						<div class="my-0.5 border-t border-surface-700"></div>
-							<button
-								class="flex w-full items-center gap-2 whitespace-nowrap px-4 py-1.5 text-laya-secondary transition-colors
-									{hasUnread ? 'text-surface-300 hover:bg-surface-700' : 'text-surface-600 cursor-not-allowed'}"
-								onclick={() => { handleMarkAllRead(); feedActionsMenuOpen = false; }}
-								disabled={markingAllRead || !hasUnread}
-							>
-								<svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-								</svg>
-								Mark all read
-							</button>
-						<div class="my-0.5 border-t border-surface-700"></div>
-						<button
-							class="flex w-full items-center gap-2 whitespace-nowrap px-4 py-1.5 text-laya-secondary transition-colors hover:bg-surface-700
-								{summaryModalOpen ? 'text-laya-orange' : 'text-surface-300'}"
-							onclick={() => { setSummaryModalOpen(true); feedActionsMenuOpen = false; }}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-							</svg>
-							Summary
-						</button>
-					</div>
-				{/if}
-			</div>
-		{:else}
-			<!-- Inline action buttons -->
-			<div class="filter-dropdown relative" bind:this={filterBtnEl}>
-				<button
-					onclick={() => { if (!filterPopoverOpen && filterBtnEl) { const r = filterBtnEl.getBoundingClientRect(); filterMenuPos = { top: r.bottom + 6, left: r.left }; } filterPopoverOpen = !filterPopoverOpen; }}
-					class="relative flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-laya-secondary transition-colors
-						{hasActiveFilters
-							? 'border-laya-orange/30 bg-laya-orange/10 text-laya-orange'
-							: 'border-surface-700 bg-surface-800/60 text-surface-400 hover:text-surface-200 hover:border-surface-600'}"
-				>
-					<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-					</svg>
-					Filters
-					{#if hasActiveFilters}
-						<span class="flex h-4 w-4 items-center justify-center rounded-full bg-laya-orange text-laya-micro font-bold text-surface-900">{activeFilterCount}</span>
-					{/if}
-				</button>
-			</div>
-
-			<button
-				onclick={toggleRecentDrawer}
-				class="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-laya-secondary transition-colors
-					{$recentDrawerOpen
-						? 'border-laya-orange/30 bg-laya-orange/10 text-laya-orange'
-						: 'border-surface-700 bg-surface-800/60 text-surface-400 hover:text-surface-200 hover:border-surface-600'}"
-			>
-				<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-				</svg>
-				Recent
-			</button>
-
-			<button
-				onclick={() => ($feedFilters.showBookmarked = !$feedFilters.showBookmarked)}
-				class="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-laya-secondary transition-colors
-					{$feedFilters.showBookmarked
-						? 'border-laya-orange/30 bg-laya-orange/10 text-laya-orange'
-						: 'border-surface-700 bg-surface-800/60 text-surface-400 hover:text-surface-200 hover:border-surface-600'}"
-			>
-				<svg class="h-3.5 w-3.5" fill={$feedFilters.showBookmarked ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-				</svg>
-				Bookmarks
-			</button>
-
-			<div class="h-5 w-px bg-surface-700/60 mx-0.5"></div>
-
-			<button
-					onclick={handleMarkAllRead}
-					disabled={markingAllRead || !hasUnread}
-					class="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-laya-secondary transition-colors
-						border-surface-700 bg-surface-800/60
-						{hasUnread
-							? 'text-surface-400 hover:text-surface-200 hover:border-surface-600'
-							: 'text-surface-600 cursor-not-allowed'}
-						disabled:opacity-40"
-				>
-					<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-					</svg>
-					Mark all read
-				</button>
-
-			<div class="h-5 w-px bg-surface-700/60 mx-0.5"></div>
-
-			<button
-				onclick={() => { setSummaryModalOpen(true); }}
-				class="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-laya-secondary transition-colors
-					{summaryModalOpen
-						? 'border-laya-orange/30 bg-laya-orange/10 text-laya-orange'
-						: 'border-surface-700 bg-surface-800/60 text-surface-400 hover:text-surface-200 hover:border-surface-600'}"
-			>
-				<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-				</svg>
-				Summary
-			</button>
-		{/if}
+		<FeedToolbarActions
+			collapsed={feedActionsCollapsed}
+			bind:menuOpen={feedActionsMenuOpen}
+			{hasActiveFilters}
+			{activeFilterCount}
+			recentDrawerOpen={$recentDrawerOpen}
+			showBookmarked={$feedFilters.showBookmarked}
+			{summaryModalOpen}
+			{hasUnread}
+			{markingAllRead}
+			onOpenFilters={(pos) => { filterMenuPos = pos; filterPopoverOpen = !filterPopoverOpen; }}
+			onToggleRecent={toggleRecentDrawer}
+			onToggleBookmarked={() => ($feedFilters.showBookmarked = !$feedFilters.showBookmarked)}
+			onMarkAllRead={handleMarkAllRead}
+			onOpenSummary={() => setSummaryModalOpen(true)}
+		/>
 
 		<!-- Filter popover (rendered outside collapse conditional so it works in both modes) -->
 		<FilterPopover
@@ -2133,207 +1986,52 @@
 		<!-- Timeline owns its own scrolling (the lanes column scrolls, the heat rail
 		     stays pinned), so the shared container must not scroll or pad in that mode. -->
 		<div bind:this={containerEl} data-view-mode={$feedViewMode} class="feed-list-container flex min-w-0 flex-1 flex-col {$feedViewMode === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto p-3'} transition-opacity duration-[250ms] ease-out {relatedViewExiting ? 'opacity-0' : 'opacity-100'}">
-			{#if $feedFilters.showRelated}
-				<div class="mb-3 flex items-center gap-2 rounded-lg border border-laya-orange/30 bg-laya-orange/10 px-3 py-2">
-					<svg class="h-4 w-4 shrink-0 text-laya-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-					</svg>
-					<span class="min-w-0 flex-1 truncate text-laya-secondary text-laya-orange">
-						Related to "<span class="font-medium">{$feedFilters.relatedSourceHeader}</span>"
-					</span>
-					<button
-						onclick={() => clearRelatedFilter()}
-						class="shrink-0 rounded p-0.5 text-laya-orange/70 transition-colors hover:bg-laya-orange/20 hover:text-laya-orange"
-						aria-label="Clear related cards filter"
-					>
-						<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-						</svg>
-					</button>
-				</div>
-			{/if}
-			{#if $feedViewMode === 'timeline'}
-				<!-- ── TIMELINE VIEW ── -->
-				{#if error}
-					<div class="m-3 flex items-start gap-2 rounded-lg border border-red-800 bg-red-900/30 px-4 py-3 text-laya-base text-red-300">
-						<span class="flex-1">{error}</span>
-						<button class="shrink-0 text-red-400 hover:text-red-200" onclick={() => (error = null)} aria-label="Dismiss error">
-							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-						</button>
-					</div>
-				{/if}
-				<TimelineView
-					groups={filteredGroups}
-					{dayEvents}
-					{loading}
-					date={$feedDate}
-					{isToday}
-					selectedCardId={selectedCard?.card_id ?? ''}
-					{selectedEntityId}
-					{hasAnySelection}
-					hasMore={hasMoreGroups}
-					loadingMore={loadingMoreGroups}
-					remaining={Math.max(0, totalGroups - groups.length)}
-					onloadmore={loadMoreGroups}
-					onselectcard={selectCard}
-					onselectgroup={selectGroupSummary}
-					emptyLabel={searchActive
-						? `No cards match "${searchQuery}"`
-						: `No cards for ${formatDateLabel($feedDate)}`}
-				/>
-			{:else if loading && groups.length === 0}
-				<div class="py-12 text-center text-surface-400">Loading cards...</div>
-			{:else if error}
-				<div class="flex items-start gap-2 rounded-lg border border-red-800 bg-red-900/30 px-4 py-3 text-laya-base text-red-300">
-					<span class="flex-1">{error}</span>
-					<button class="shrink-0 text-red-400 hover:text-red-200" onclick={() => (error = null)} aria-label="Dismiss error">
-						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-					</button>
-				</div>
-			{:else if groups.length === 0}
-				<div class="py-12 text-center text-surface-500">
-					<p class="text-laya-heading">{$feedFilters.showRelated ? 'No related cards found' : $feedFilters.showBookmarked ? 'No bookmarked cards' : `No cards for ${formatDateLabel($feedDate)}`}</p>
-					<p class="mt-1 text-laya-base">
-						{#if $feedFilters.showRelated}
-							<button class="text-laya-orange hover:underline" onclick={() => clearRelatedFilter()}>Back to feed</button>
-						{:else if $feedFilters.showBookmarked}
-							Bookmark cards to save them for later
-						{:else if $feedPrevDate}
-							<button class="text-laya-orange hover:underline" onclick={() => { if ($feedPrevDate) $feedDate = $feedPrevDate; }}>
-								View {formatDateLabel($feedPrevDate)}
-							</button>
-						{:else}
-							Cards will appear here as events are processed
-						{/if}
-					</p>
-
-				</div>
-			{:else if filteredGroups.length === 0 && searchActive}
-				<div class="py-12 text-center text-surface-500">
-					<svg class="mx-auto mb-2 h-8 w-8 text-surface-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-					</svg>
-					<p class="text-laya-base">No cards match "<span class="text-surface-300">{searchQuery}</span>"</p>
-					<button class="mt-2 text-laya-secondary text-laya-orange hover:underline" onclick={() => (searchQuery = '')}>Clear search</button>
-				</div>
-			<!-- ── LIST VIEW ── -->
-			{:else if $feedViewMode === 'list'}
-				{#if sections}
-					<!-- Sorted list view with section separators -->
-					{#each sections as [sectionTitle, sectionGroups], si}
-						{@const isCollapsed = collapsedSections.has(sectionTitle)}
-						<div
-							class="flex cursor-pointer items-center gap-3 pr-3 {si > 0 ? 'mt-5' : ''} mb-2 select-none"
-							role="button"
-							tabindex="0"
-							onclick={() => toggleSection(sectionTitle)}
-							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(sectionTitle); } }}
-						>
-							<svg class="h-3.5 w-3.5 shrink-0 text-surface-500 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-							</svg>
-							<span class="text-laya-secondary font-semibold uppercase tracking-wider text-surface-400">{sectionTitle}</span>
-							<div class="flex-1 border-t border-surface-700"></div>
-							<span class="text-laya-micro text-surface-500">{sectionGroups.reduce((s, g) => s + g.card_count, 0)}</span>
-						</div>
-						{#if !isCollapsed}
-							<div class="flex flex-col gap-1 mb-2">
-								{#each sectionGroups as group (group.entity_id)}
-									<div data-entity-id={group.entity_id} data-list-row>
-									{#if group.card_count === 1}
-										<ListRow card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} selectedCardId={selectedCard?.card_id ?? ''} bulkSelected={$feedSelection.has(group.cards[0].card_id)} onbulktoggle={handleBulkToggle} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-									{:else}
-										<ListGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} scrollToCardId={_scrollToCardId} bulkSelectedIds={$feedSelection} onbulktoggle={handleBulkToggle} onbulktogglegroup={handleBulkToggleGroup} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} />
-									{/if}
-									</div>
-								{/each}
-							</div>
-						{/if}
-					{/each}
-				{:else}
-					<!-- Default list view -->
-					<div class="flex flex-col gap-1">
-						{#each filteredGroups as group (group.entity_id)}
-							<div data-entity-id={group.entity_id} data-list-row>
-							{#if group.card_count === 1}
-								<ListRow card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} selectedCardId={selectedCard?.card_id ?? ''} bulkSelected={$feedSelection.has(group.cards[0].card_id)} onbulktoggle={handleBulkToggle} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-							{:else}
-								<ListGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} scrollToCardId={_scrollToCardId} bulkSelectedIds={$feedSelection} onbulktoggle={handleBulkToggle} onbulktogglegroup={handleBulkToggleGroup} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} />
-							{/if}
-							</div>
-						{/each}
-					</div>
-				{/if}
-			<!-- ── CARD VIEW ── -->
-			{:else if sections}
-				<!-- Sorted view with section separators -->
-				{#each sections as [sectionTitle, sectionGroups], si}
-					{@const isCollapsed = collapsedSections.has(sectionTitle)}
-					<div
-						class="flex cursor-pointer items-center gap-3 pr-3 {si > 0 ? 'mt-5' : ''} mb-3 select-none"
-						role="button"
-						tabindex="0"
-						onclick={() => toggleSection(sectionTitle)}
-						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(sectionTitle); } }}
-					>
-						<svg class="h-3.5 w-3.5 shrink-0 text-surface-500 transition-transform {isCollapsed ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-						</svg>
-						<span class="text-laya-secondary font-semibold uppercase tracking-wider text-surface-400">{sectionTitle}</span>
-						<div class="flex-1 border-t border-surface-700"></div>
-						<span class="text-laya-micro text-surface-500">{sectionGroups.reduce((s, g) => s + g.card_count, 0)}</span>
-					</div>
-					{#if !isCollapsed}
-						<div class="flex flex-wrap gap-4">
-							{#each toColumns(sectionGroups) as col}
-								<div class="flex w-[320px] flex-col gap-4">
-									{#each col as group (group.entity_id)}
-									{@const isGroupExiting = group.cards.every((c) => exitingCardIds.has(c.card_id))}
-									<div data-entity-id={group.entity_id} class="card-exit-wrap {isGroupExiting ? 'card-exiting' : ''}">
-										{#if group.card_count === 1}
-											<ActionCardComponent card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} onlink={handleLinkCard} selectedCardId={selectedCard?.card_id ?? ''} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-										{:else}
-											<CardGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} scrollToCardId={_scrollToCardId} {detailPanelOpen} />
-										{/if}
-									</div>
-								{/each}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				{/each}
-			{:else}
-				<!-- Default column layout (newest / oldest) -->
-				<div class="flex flex-wrap gap-4">
-					{#each columns as col}
-						<div class="flex w-[320px] flex-col gap-4">
-							{#each col as group (group.entity_id)}
-								<div data-entity-id={group.entity_id}>
-									{#if group.card_count === 1}
-										<ActionCardComponent card={group.cards[0]} onselect={selectCard} ondelete={handleDelete} onlink={handleLinkCard} selectedCardId={selectedCard?.card_id ?? ''} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} />
-									{:else}
-										<CardGroupComponent {group} onselect={selectCard} onselectgroup={selectGroupSummary} ondelete={handleDelete} onlink={handleLinkGroup} selectedCardId={selectedCard?.card_id ?? ''} {selectedEntityId} hasSelection={hasAnySelection} lastViewedCardId={lastViewedCardId ?? ''} lastViewedEntityId={lastViewedEntityId ?? ''} scrollToCardId={_scrollToCardId} {detailPanelOpen} />
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/each}
-				</div>
-			{/if}
-			{#if hasMoreGroups && $feedViewMode !== 'timeline'}
-				<!-- Group pagination: load the next page of groups (P4-9). Sits below
-				     both list and card views; the timeline carries its own control in
-				     the control strip (it has no scroll room below the lanes). -->
-				<div class="flex w-full justify-center py-6">
-					<button
-						class="rounded-lg border border-surface-600 bg-surface-800 px-6 py-2.5 text-laya-base font-medium text-surface-200 transition-colors hover:border-laya-orange/40 hover:bg-surface-700 disabled:cursor-not-allowed disabled:opacity-60"
-						onclick={loadMoreGroups}
-						disabled={loadingMoreGroups}
-					>
-						{loadingMoreGroups ? 'Loading…' : `Load more (${totalGroups - groups.length} more)`}
-					</button>
-				</div>
-			{/if}
+			<FeedBody
+				viewMode={$feedViewMode}
+				{groups}
+				{filteredGroups}
+				{dayEvents}
+				{loading}
+				{error}
+				feedDate={$feedDate}
+				feedPrevDate={$feedPrevDate}
+				{isToday}
+				{selectedCard}
+				{selectedEntityId}
+				{hasAnySelection}
+				{hasMoreGroups}
+				{loadingMoreGroups}
+				{totalGroups}
+				{searchActive}
+				{searchQuery}
+				showRelated={$feedFilters.showRelated}
+				relatedSourceHeader={$feedFilters.relatedSourceHeader}
+				showBookmarked={$feedFilters.showBookmarked}
+				{sections}
+				{collapsedSections}
+				{toColumns}
+				{columns}
+				{exitingCardIds}
+				scrollToCardId={_scrollToCardId}
+				{detailPanelOpen}
+				bulkSelectedIds={$feedSelection}
+				{lastViewedCardId}
+				{lastViewedEntityId}
+				{formatDateLabel}
+				onSelectCard={selectCard}
+				onSelectGroup={selectGroupSummary}
+				onDelete={handleDelete}
+				onLinkCard={handleLinkCard}
+				onLinkGroup={handleLinkGroup}
+				onBulkToggle={handleBulkToggle}
+				onBulkToggleGroup={handleBulkToggleGroup}
+				onToggleSection={toggleSection}
+				onLoadMore={loadMoreGroups}
+				onClearRelated={() => clearRelatedFilter()}
+				onClearSearch={() => (searchQuery = '')}
+				onDismissError={() => (error = null)}
+				onGotoPrevDate={() => { if ($feedPrevDate) $feedDate = $feedPrevDate; }}
+			/>
 		</div>
 
 		<!-- Detail panel -->
